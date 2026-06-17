@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { startRun } from '../src/core.js';
 import { verifyRunCompletion } from '../src/runner.js';
 
 async function createCompletionFixture({ progress, prd, judge }) {
@@ -58,4 +59,12 @@ test('verifyRunCompletion requires non-empty PRD stories and Judge PASS', async 
     judgeOk: false,
     complete: false
   });
+});
+
+test('startRun does not create a permanent pending planner timeline placeholder for real runs', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-real-run-phases-'));
+  const run = await startRun({ cwd, prompt: 'real run should wait without a pending phase', dryRun: false });
+
+  assert.equal(run.status, 'waiting-for-agent-adapter');
+  assert.deepEqual(run.phases, []);
 });

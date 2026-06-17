@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 export const STATE_DIR = '.agent-loop';
 export const RUN_FILE = 'run.json';
 export const DEFAULT_MAX_ROUNDS = 30;
+export const REVIEW_FILES = { spec: 'spec.md', prd: 'prd.json' };
 
 export function stateDir(cwd = process.cwd()) {
   return resolve(cwd, STATE_DIR);
@@ -85,16 +86,14 @@ export async function startRun({
       worker: models.worker || 'default-worker',
       judge: models.judge || 'default-judge'
     },
-    phases: [{
+    phases: dryRun ? [{
       id: 'plan',
       role: 'planner',
-      status: dryRun ? 'completed' : 'pending',
+      status: 'completed',
       startedAt: now,
-      completedAt: dryRun ? now : undefined,
-      note: dryRun
-        ? 'Dry run created local state only. Agent adapters will be implemented next.'
-        : 'Run created; waiting for an agent adapter implementation.'
-    }],
+      completedAt: now,
+      note: 'Dry run created local state only. Agent adapters will be implemented next.'
+    }] : [],
     createdAt: now,
     updatedAt: now
   };
@@ -118,6 +117,32 @@ export async function seedHarnessFiles(run, cwd = process.cwd()) {
   if (!existsSync(progressPath)) {
     await writeFile(progressPath, '', 'utf8');
   }
+}
+
+function reviewFilePath(cwd, key) {
+  const filename = REVIEW_FILES[key];
+  if (!filename) throw new Error('review file must be one of: spec, prd.');
+  return join(stateDir(cwd), filename);
+}
+
+export async function readReviewFiles(cwd = process.cwd()) {
+  await ensureStateDir(cwd);
+  return Object.fromEntries(await Promise.all(
+    Object.keys(REVIEW_FILES).map(async key => {
+      const path = reviewFilePath(cwd, key);
+      return [key, existsSync(path) ? await readFile(path, 'utf8') : ''];
+    })
+  ));
+}
+
+export async function writeReviewFiles({ cwd = process.cwd(), files = {} } = {}) {
+  await ensureStateDir(cwd);
+  for (const key of Object.keys(REVIEW_FILES)) {
+    if (Object.hasOwn(files, key)) {
+      await writeFile(reviewFilePath(cwd, key), String(files[key]), 'utf8');
+    }
+  }
+  return readReviewFiles(cwd);
 }
 
 export function summarizeRun(run) {

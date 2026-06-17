@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_MAX_ROUNDS, readRun, startRun, stateDir } from './core.js';
+import { DEFAULT_MAX_ROUNDS, readReviewFiles, readRun, startRun, stateDir, writeReviewFiles } from './core.js';
 import { runAgentLoop } from './runner.js';
 import { readEditablePrompts, writeEditablePrompts } from './prompts.js';
 
@@ -95,6 +95,13 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
       if (url.pathname === '/api/prompts' && req.method === 'GET') {
         return json(res, 200, await readEditablePrompts(cwd));
       }
+      if (url.pathname === '/api/review' && req.method === 'GET') {
+        return json(res, 200, { files: await readReviewFiles(cwd) });
+      }
+      if (url.pathname === '/api/review' && req.method === 'PUT') {
+        const body = JSON.parse(await readBody(req) || '{}');
+        return json(res, 200, { files: await writeReviewFiles({ cwd, files: body.files }) });
+      }
       if (url.pathname === '/api/prompts' && req.method === 'PUT') {
         const body = JSON.parse(await readBody(req) || '{}');
         return json(res, 200, await writeEditablePrompts({
@@ -102,6 +109,15 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
           systemPrompts: body.systemPrompts,
           phasePrompts: body.phasePrompts
         }));
+      }
+      if (url.pathname === '/api/resume' && req.method === 'POST') {
+        const run = await readRun(cwd);
+        if (!run) return json(res, 409, { error: 'No run exists to resume.' });
+        if (run.status !== 'waiting-for-review') {
+          return json(res, 409, { error: 'Only runs waiting for review can be resumed.' });
+        }
+        const resumed = await runAgentLoop({ cwd, plannerOnly: false });
+        return json(res, 200, { run: resumed });
       }
       if (url.pathname === '/api/run' && req.method === 'POST') {
         const body = JSON.parse(await readBody(req) || '{}');

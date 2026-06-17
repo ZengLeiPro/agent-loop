@@ -16,7 +16,7 @@
       </div>
       <div class="topbar-actions">
         <button id="refresh" class="button button-secondary" type="button">刷新状态</button>
-        <a class="button button-ghost" href="#prompts">编辑提示语</a>
+        <a class="button button-ghost" href="#review">审查 spec / PRD</a><a class="button button-ghost" href="#prompts">编辑提示语</a>
       </div>
     </header>
 
@@ -101,9 +101,20 @@
       </section>
     </section>
 
+    <section id="review" class="review-card" aria-labelledby="review-title">
+      <div class="panel-header">
+        <div><div class="section-kicker">03 · Human checkpoint</div><h2 id="review-title">Planner 产物审查</h2><p class="hint">Planner 后暂停时，在这里审阅并修改 <code>.agent-loop/spec.md</code> 与 <code>.agent-loop/prd.json</code>，保存后点击继续运行。</p></div>
+        <div class="actions"><button id="loadReview" class="button button-secondary" type="button">加载 spec / PRD</button><button id="saveReview" class="button button-secondary" type="button">保存修改</button><button id="resumeRun" class="button button-primary" type="button">继续运行</button></div>
+      </div>
+      <div class="prompt-grid two-col">
+        <label>spec.md<textarea id="reviewSpec" class="review-editor" spellcheck="false"></textarea></label>
+        <label>prd.json<textarea id="reviewPrd" class="review-editor" spellcheck="false"></textarea></label>
+      </div>
+    </section>
+
     <section id="prompts" class="prompts-card" aria-labelledby="prompts-title">
       <div class="panel-header">
-        <div><div class="section-kicker">03 · Prompt library</div><h2 id="prompts-title">提示语编辑</h2><p class="hint">保存后写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。</p></div>
+        <div><div class="section-kicker">04 · Prompt library</div><h2 id="prompts-title">提示语编辑</h2><p class="hint">保存后写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。</p></div>
         <div class="actions"><button id="loadPrompts" class="button button-secondary" type="button">重新加载提示语</button><button id="savePrompts" class="button button-primary" type="button">保存提示语</button></div>
       </div>
       <div class="prompt-grid three-col">

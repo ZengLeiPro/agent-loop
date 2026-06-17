@@ -18,6 +18,11 @@ const refreshButton = document.querySelector('#refresh');
 const createButton = document.querySelector('#create');
 const loadPromptsButton = document.querySelector('#loadPrompts');
 const savePromptsButton = document.querySelector('#savePrompts');
+const loadReviewButton = document.querySelector('#loadReview');
+const saveReviewButton = document.querySelector('#saveReview');
+const resumeRunButton = document.querySelector('#resumeRun');
+const reviewSpecEl = document.querySelector('#reviewSpec');
+const reviewPrdEl = document.querySelector('#reviewPrd');
 
 const AUTO_REFRESH_STATUSES = new Set(['waiting-for-agent-adapter', 'running']);
 const SAFE_CLASS_TOKEN = /^[a-z0-9_-]+$/i;
@@ -205,6 +210,7 @@ function renderStatus(data) {
   statusEl.textContent = JSON.stringify(data, null, 2);
   renderSummary(data);
   renderTimeline(data.run);
+  resumeRunButton.disabled = data.run?.status !== 'waiting-for-review';
   setAutoRefresh(data.run);
 }
 
@@ -248,6 +254,59 @@ async function loadPrompts() {
   } finally {
     loadPromptsButton.disabled = false;
     loadPromptsButton.textContent = '重新加载提示语';
+  }
+}
+
+async function loadReview() {
+  loadReviewButton.disabled = true;
+  loadReviewButton.textContent = '加载中…';
+  try {
+    const response = await fetch('/api/review');
+    const data = await readJson(response);
+    reviewSpecEl.value = data.files?.spec || '';
+    reviewPrdEl.value = data.files?.prd || '';
+  } catch (error) {
+    renderError(error);
+  } finally {
+    loadReviewButton.disabled = false;
+    loadReviewButton.textContent = '加载 spec / PRD';
+  }
+}
+
+async function saveReview() {
+  saveReviewButton.disabled = true;
+  saveReviewButton.textContent = '保存中…';
+  try {
+    const response = await fetch('/api/review', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ files: { spec: reviewSpecEl.value, prd: reviewPrdEl.value } })
+    });
+    await readJson(response);
+    statusSummaryEl.querySelector('.success-card')?.remove();
+    statusSummaryEl.insertAdjacentHTML('afterbegin', '<div class="success-card">Planner 产物已保存，可以继续运行。</div>');
+  } catch (error) {
+    renderError(error);
+    throw error;
+  } finally {
+    saveReviewButton.disabled = false;
+    saveReviewButton.textContent = '保存修改';
+  }
+}
+
+async function resumeRun() {
+  resumeRunButton.disabled = true;
+  resumeRunButton.textContent = '继续中…';
+  try {
+    await saveReview();
+    const response = await fetch('/api/resume', { method: 'POST' });
+    const data = await readJson(response);
+    renderStatus({ cwd: lastStatusData?.cwd || '', stateDir: lastStatusData?.stateDir || '', run: data.run });
+  } catch (error) {
+    renderError(error);
+  } finally {
+    resumeRunButton.textContent = '继续运行';
+    resumeRunButton.disabled = lastStatusData?.run?.status !== 'waiting-for-review';
   }
 }
 
@@ -322,8 +381,11 @@ async function createRun() {
 }
 
 refreshButton.addEventListener('click', () => refresh().catch(renderError));
+loadReviewButton.addEventListener('click', loadReview);
+saveReviewButton.addEventListener('click', saveReview);
+resumeRunButton.addEventListener('click', resumeRun);
 createButton.addEventListener('click', createRun);
 loadPromptsButton.addEventListener('click', loadPrompts);
 savePromptsButton.addEventListener('click', savePrompts);
 
-Promise.all([refresh(), loadPrompts()]).catch(renderError);
+Promise.all([refresh(), loadReview(), loadPrompts()]).catch(renderError);
