@@ -27,7 +27,7 @@ Important limitations:
 - Live runs require `npm install` in this folder after splitting/checking out the project.
 - Live runs require Claude Agent SDK credentials and whatever local tool permissions your SDK setup needs.
 - Git safety checks, rollback, pause/resume/cancel, and robust per-round diff review are still next steps.
-- The web UI can start a live run, but long-running live execution is currently a simple HTTP request rather than a streamed job queue.
+- The web UI is localized in Simplified Chinese, can start a live run, can pass run configuration (round/turn limits, permission mode, planner-only mode, and per-role models), and can edit the local agent/system and phase prompt templates used by future runs. Long-running live execution is currently a simple HTTP request rather than a streamed job queue.
 
 ## Usage
 
@@ -45,7 +45,7 @@ node ./bin/agent-loop.js status
 node ./bin/agent-loop.js ui
 ```
 
-Then open <http://127.0.0.1:4317>.
+Then open <http://127.0.0.1:4317>. The Simplified Chinese UI exposes the same core run configuration as the CLI: max rounds, max turns, permission mode, planner-only mode, and planner/worker/judge model overrides. These values are submitted to `/api/run` and persisted into `.agent-loop/run.json` for the created run. The prompt editor loads and saves editable prompt files under `.agent-loop/prompts/`; saved agent system prompts and phase task prompt templates are used by subsequent live runs.
 
 ## Scripts
 
@@ -67,6 +67,11 @@ npm start
   progress.txt
   judge-<round>.md
   logs/
+  prompts/
+    planner.md
+    worker.md
+    judge.md
+    phase-prompts.json
 ```
 
 ## Planned next steps

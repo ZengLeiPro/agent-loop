@@ -56,7 +56,16 @@ export async function initProject({ cwd = process.cwd(), force = false } = {}) {
   return { created: true, run };
 }
 
-export async function startRun({ prompt, cwd = process.cwd(), maxRounds = DEFAULT_MAX_ROUNDS, dryRun = false } = {}) {
+export async function startRun({
+  prompt,
+  cwd = process.cwd(),
+  maxRounds = DEFAULT_MAX_ROUNDS,
+  dryRun = false,
+  models = {},
+  maxTurns = 50,
+  permissionMode = 'acceptEdits',
+  plannerOnly = false
+} = {}) {
   if (!prompt || !prompt.trim()) throw new Error('A non-empty prompt is required.');
   await ensureStateDir(cwd);
   const now = new Date().toISOString();
@@ -68,10 +77,13 @@ export async function startRun({ prompt, cwd = process.cwd(), maxRounds = DEFAUL
     prompt: prompt.trim(),
     currentRound: 0,
     maxRounds,
+    maxTurns,
+    permissionMode,
+    plannerOnly,
     models: {
-      planner: 'default-planner',
-      worker: 'default-worker',
-      judge: 'default-judge'
+      planner: models.planner || 'default-planner',
+      worker: models.worker || 'default-worker',
+      judge: models.judge || 'default-judge'
     },
     phases: [{
       id: 'plan',

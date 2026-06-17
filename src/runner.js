@@ -1,17 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { ClaudeAgentAdapter } from './claude-agent-adapter.js';
 import { DEFAULT_MAX_ROUNDS, readRun, seedHarnessFiles, startRun, stateDir, writeRun } from './core.js';
-
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const projectRoot = resolve(__dirname, '..');
-const promptsRoot = join(projectRoot, 'prompts', 'ralph-compound');
-
-function promptFile(name) {
-  return join(promptsRoot, name);
-}
+import { readEditablePrompts, renderPhasePrompt, systemPromptFile } from './prompts.js';
 
 async function appendFile(path, content) {
   await mkdir(dirname(path), { recursive: true });
@@ -87,9 +79,10 @@ export async function runAgentLoop({
 } = {}) {
   let run = await readRun(cwd);
   if (!run || prompt) {
-    run = await startRun({ prompt, cwd, maxRounds, dryRun: false });
+    run = await startRun({ prompt, cwd, maxRounds, dryRun: false, models, maxTurns, permissionMode, plannerOnly });
   }
   await seedHarnessFiles(run, cwd);
+  const editablePrompts = await readEditablePrompts(cwd);
 
   const adapterFor = role => new ClaudeAgentAdapter({ model: models[role], maxTurns, permissionMode });
 
@@ -99,8 +92,8 @@ export async function runAgentLoop({
       cwd,
       run,
       role: 'planner',
-      prompt: `Create .agent-loop/spec.md and .agent-loop/prd.json for this request:\n\n${run.prompt}`,
-      systemPromptFile: promptFile('planner.md')
+      prompt: renderPhasePrompt(editablePrompts.phasePrompts.planner, { prompt: run.prompt }),
+      systemPromptFile: systemPromptFile(cwd, 'planner')
     });
   }
 
@@ -121,8 +114,8 @@ export async function runAgentLoop({
       run,
       role: 'worker',
       round,
-      prompt: `Round ${round}. Read .agent-loop/spec.md and .agent-loop/prd.json. Implement exactly one unfinished story, update bookkeeping, and commit.`,
-      systemPromptFile: promptFile('worker.md')
+      prompt: renderPhasePrompt(editablePrompts.phasePrompts.worker, { round, prompt: run.prompt }),
+      systemPromptFile: systemPromptFile(cwd, 'worker')
     });
 
     await runAgentPhase({
@@ -131,8 +124,8 @@ export async function runAgentLoop({
       run,
       role: 'judge',
       round,
-      prompt: `Round ${round}. Audit the latest worker round and write .agent-loop/judge-${round}.md ending in VERDICT: PASS or VERDICT: FAIL.`,
-      systemPromptFile: promptFile('judge.md')
+      prompt: renderPhasePrompt(editablePrompts.phasePrompts.judge, { round, prompt: run.prompt }),
+      systemPromptFile: systemPromptFile(cwd, 'judge')
     });
 
     const verification = await verifyRunCompletion(cwd, round);
