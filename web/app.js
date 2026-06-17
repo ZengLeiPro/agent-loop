@@ -317,7 +317,7 @@ async function createRun() {
     renderError(error);
   } finally {
     createButton.disabled = false;
-    createButton.textContent = '创建运行';
+    createButton.textContent = '启动运行';
   }
 }
 
