@@ -11,6 +11,7 @@ const webRoot = resolve(__dirname, '../web');
 
 const DEFAULT_MAX_TURNS = 50;
 const DEFAULT_PERMISSION_MODE = 'acceptEdits';
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -40,8 +41,37 @@ function positiveInteger(value, fallback, name) {
 function cleanModels(models = {}) {
   return Object.fromEntries(
     ['planner', 'worker', 'judge']
-      .map(role => [role, typeof models[role] === 'string' && models[role].trim() ? models[role].trim() : undefined])
+      .map(role => [role, optionalStringValue(models[role])])
       .filter(([, model]) => model)
+  );
+}
+
+function optionalStringValue(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function optionalPositiveInteger(value, name) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer.`);
+  return number;
+}
+
+function optionalEffort(value) {
+  const effort = optionalStringValue(value);
+  if (!effort) return undefined;
+  if (!EFFORT_LEVELS.has(effort)) throw new Error('effort must be one of: low, medium, high, xhigh, max.');
+  return effort;
+}
+
+function cleanSdkOptions(sdk = {}) {
+  return Object.fromEntries(
+    Object.entries({
+      apiEndpoint: optionalStringValue(sdk.apiEndpoint),
+      apiKey: optionalStringValue(sdk.apiKey),
+      effort: optionalEffort(sdk.effort),
+      maxThinkingTokens: optionalPositiveInteger(sdk.maxThinkingTokens, 'maxThinkingTokens')
+    }).filter(([, value]) => value !== undefined)
   );
 }
 
@@ -75,7 +105,8 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
             ? body.permissionMode.trim()
             : DEFAULT_PERMISSION_MODE,
           plannerOnly: Boolean(body.plannerOnly),
-          models: cleanModels(body.models)
+          models: cleanModels(body.models),
+          sdk: cleanSdkOptions(body.sdk)
         };
         const run = body.dryRun !== false
           ? await startRun({ ...options, dryRun: true })
@@ -84,7 +115,8 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
               maxTurns: options.maxTurns,
               permissionMode: options.permissionMode,
               plannerOnly: options.plannerOnly,
-              models: options.models
+              models: options.models,
+              sdk: options.sdk
             });
         return json(res, 201, { run });
       }

@@ -12,11 +12,24 @@ const DEFAULT_ALLOWED_TOOLS = [
 ];
 
 export class ClaudeAgentAdapter {
-  constructor({ model, maxTurns = 50, permissionMode = 'acceptEdits', allowedTools = DEFAULT_ALLOWED_TOOLS } = {}) {
+  constructor({
+    model,
+    maxTurns = 50,
+    permissionMode = 'acceptEdits',
+    allowedTools = DEFAULT_ALLOWED_TOOLS,
+    apiKey,
+    apiEndpoint,
+    effort,
+    maxThinkingTokens
+  } = {}) {
     this.model = model;
     this.maxTurns = maxTurns;
     this.permissionMode = permissionMode;
     this.allowedTools = allowedTools;
+    this.apiKey = apiKey;
+    this.apiEndpoint = apiEndpoint;
+    this.effort = effort;
+    this.maxThinkingTokens = maxThinkingTokens;
   }
 
   async run({ cwd, prompt, systemPromptFile, role, onEvent = () => {} }) {
@@ -38,7 +51,16 @@ export class ClaudeAgentAdapter {
       maxTurns: this.maxTurns,
       permissionMode: this.permissionMode,
       allowedTools: this.allowedTools,
-      ...(this.model ? { model: this.model } : {})
+      ...(this.model ? { model: this.model } : {}),
+      ...(this.effort ? { effort: this.effort } : {}),
+      ...(this.maxThinkingTokens !== undefined ? { maxThinkingTokens: this.maxThinkingTokens } : {}),
+      ...(this.apiKey || this.apiEndpoint ? {
+        env: {
+          ...process.env,
+          ...(this.apiKey ? { ANTHROPIC_API_KEY: this.apiKey } : {}),
+          ...(this.apiEndpoint ? { ANTHROPIC_BASE_URL: this.apiEndpoint } : {})
+        }
+      } : {})
     };
 
     let resultText = '';

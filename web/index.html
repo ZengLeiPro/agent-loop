@@ -55,7 +55,31 @@
           Judge 模型
           <input id="judgeModel" type="text" placeholder="使用 SDK 默认值" />
         </label>
+        <label>
+          API 端点
+          <input id="apiEndpoint" type="url" placeholder="未配置则使用 SDK 默认端点" autocomplete="off" />
+        </label>
+        <label>
+          API Key
+          <input id="apiKey" type="password" placeholder="未配置则使用环境或 SDK 登录状态" autocomplete="off" />
+        </label>
+        <label>
+          思考程度 effort
+          <select id="effort">
+            <option value="">使用 SDK 默认值</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+          </select>
+        </label>
+        <label>
+          最大 thinking tokens
+          <input id="maxThinkingTokens" type="number" min="1" step="1" placeholder="未配置则使用 SDK 默认值" />
+        </label>
       </div>
+      <p class="hint">API 端点、API Key、effort、thinking tokens 留空时不会提交给 SDK，继续使用环境变量、登录状态或 SDK 默认值。</p>
       <label class="check"><input id="dryRun" type="checkbox" checked /> 仅创建 dry run</label>
       <label class="check"><input id="plannerOnly" type="checkbox" /> Planner 完成后暂停</label>
       <button id="create">创建运行</button>
