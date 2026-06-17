@@ -49,10 +49,10 @@ h3 { font-size: 19px; }
 .full-width { width: 100%; margin-top: 16px; }
 button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
 
-.notice, .launch-card, .monitor-card, .prompts-card { border: 1px solid var(--border); border-radius: 28px; background: rgb(255 255 255 / 88%); box-shadow: var(--shadow); }
+.notice, .launch-card, .monitor-card, .review-card, .prompts-card { border: 1px solid var(--border); border-radius: 28px; background: rgb(255 255 255 / 88%); box-shadow: var(--shadow); }
 .notice { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; padding: 14px 18px; color: #92400e; background: #fffbeb; box-shadow: none; }
 .workspace { display: grid; grid-template-columns: minmax(360px, 440px) minmax(0, 1fr); gap: 18px; align-items: start; }
-.launch-card, .monitor-card, .prompts-card { padding: 24px; }
+.launch-card, .monitor-card, .review-card, .prompts-card { padding: 24px; }
 .launch-card { position: sticky; top: 18px; }
 .monitor-card { min-height: 680px; }
 .monitor-heading, .panel-header, .run-header, .phase-main { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
@@ -109,10 +109,12 @@ summary { cursor: pointer; color: #1e293b; font-weight: 900; }
 .phase-note, .phase-error { margin: 10px 0 0; }
 .phase-error { color: #991b1b; }
 
-.prompts-card { margin-top: 18px; }
+.review-card, .prompts-card { margin-top: 18px; }
 .prompt-grid { display: grid; gap: 14px; margin-top: 16px; }
+.two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.review-editor { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 13px; }
 .prompt-editor { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 13px; }
 
-@media (max-width: 1040px) { .workspace, .three-col { grid-template-columns: 1fr; } .launch-card { position: static; } }
+@media (max-width: 1040px) { .workspace, .two-col, .three-col { grid-template-columns: 1fr; } .launch-card { position: static; } }
 @media (max-width: 720px) { .app-shell { width: min(100% - 20px, 1440px); padding-top: 18px; } .topbar, .monitor-heading, .panel-header, .run-header, .phase-main { flex-direction: column; } .compact-grid { grid-template-columns: 1fr; } .span-2 { grid-column: auto; } h1 { font-size: 38px; } }

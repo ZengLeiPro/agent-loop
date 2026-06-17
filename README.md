@@ -26,8 +26,8 @@
 
 - 拆分或 checkout 项目后，真实运行需要先在本目录执行 `npm install`。
 - 真实运行需要 Claude Agent SDK 凭据，以及本地 SDK 设置所需的工具权限。
-- Git 安全检查、回滚、暂停/恢复/取消，以及健壮的逐轮 diff review 仍是下一步工作。
-- Web UI 已本地化为简体中文，可以启动真实运行，也可以传递运行配置（轮次/turn 限制、权限模式、仅 Planner 模式、各角色模型），并能编辑后续运行使用的本地 agent/system 提示语和阶段提示语模板。长时间真实执行目前仍是一次简单 HTTP 请求，而不是带流式日志的后台任务队列。
+- Git 安全检查、回滚、长任务暂停/取消，以及健壮的逐轮 diff review 仍是下一步工作。
+- Web UI 已本地化为简体中文，可以启动真实运行，也可以传递运行配置（轮次/turn 限制、权限模式、仅 Planner 模式、各角色模型），能在 Planner 后暂停时审阅并修改 `.agent-loop/spec.md` / `.agent-loop/prd.json` 后继续运行，并能编辑后续运行使用的本地 agent/system 提示语和阶段提示语模板。长时间真实执行目前仍是一次简单 HTTP 请求，而不是带流式日志的后台任务队列。
 
 ## 使用方法
 
@@ -40,6 +40,7 @@ node ./bin/agent-loop.js init
 node ./bin/agent-loop.js init --cwd /path/to/target-repo
 node ./bin/agent-loop.js run "Add a small feature" --dry-run
 node ./bin/agent-loop.js run "Add a small feature" --planner-only
+node ./bin/agent-loop.js resume
 node ./bin/agent-loop.js run "Add a small feature" --planner-model claude-opus-4-1 --worker-model claude-sonnet-4-5 --judge-model claude-opus-4-1 --permission-mode acceptEdits
 node ./bin/agent-loop.js verify
 node ./bin/agent-loop.js status
@@ -82,7 +83,7 @@ npm start
 
 1. 校验并收紧 Claude Agent SDK 的默认权限与工具策略，确保符合真实运行环境的安全要求。
 2. 增加 Git 安全检查、每轮提交记录、diff 归档与回滚能力，降低自动修改代码时的风险。
-3. 增加 pause/resume/cancel 命令和状态机，支持长任务中断、恢复与取消。
+3. 完善 pause/cancel 命令和后台状态机，支持长任务中断与取消。
 4. 将 Web 端真实运行从单次长 HTTP 请求改造成后台任务队列，并提供流式日志、进度和错误展示。
 5. 为完成校验、失败恢复、PRD 解析、Judge verdict 提取和 prompt 渲染补充自动化测试。
 6. 强化运行观测性：记录每个角色的输入、输出摘要、耗时、成本、会话 ID 和失败原因。
@@ -93,6 +94,6 @@ npm start
 
 1. 校验默认 Claude Agent SDK 权限/工具策略是否匹配准确的内部环境。
 2. 增加 Git 安全检查和逐轮 commit/diff 跟踪。
-3. 增加 pause/resume/cancel 命令。
+3. 完善 pause/cancel 命令与后台状态机。
 4. 将 Web 真实执行改造成带流式日志的后台任务。
 5. 增加围绕完成校验和 loop 恢复的测试。

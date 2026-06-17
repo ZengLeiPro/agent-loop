@@ -5,7 +5,19 @@ import { runAgentLoop, verifyRunCompletion } from './runner.js';
 import { serve } from './web-server.js';
 
 function printHelp() {
-  console.log(`agent-loop\n\nUsage:\n  agent-loop init [--cwd PATH] [--force]\n  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]\n  agent-loop status [--cwd PATH]\n  agent-loop verify [--cwd PATH] [--round N]\n  agent-loop ui [--cwd PATH] [--port N] [--host HOST]\n\nA local-first, standalone Agent Loop runner with a bundled web UI. Use --cwd PATH to target a project directory without changing shell directories. Real runs use @anthropic-ai/claude-agent-sdk after dependencies are installed.`);
+  console.log([
+    'agent-loop',
+    '',
+    'Usage:',
+    '  agent-loop init [--cwd PATH] [--force]',
+    '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]',
+    '  agent-loop resume [--cwd PATH]',
+    '  agent-loop status [--cwd PATH]',
+    '  agent-loop verify [--cwd PATH] [--round N]',
+    '  agent-loop ui [--cwd PATH] [--port N] [--host HOST]',
+    '',
+    'A local-first, standalone Agent Loop runner with a bundled web UI. Use --cwd PATH to target a project directory without changing shell directories. Real runs use @anthropic-ai/claude-agent-sdk after dependencies are installed.'
+  ].join('\n'));
 }
 
 function readFlag(args, name, fallback) {
@@ -78,6 +90,12 @@ export async function main(args) {
       models: modelFlags(rest)
     });
     console.log('agent-loop run finished or paused.');
+    console.log(summarizeRun(run));
+    return;
+  }
+  if (command === 'resume') {
+    const run = await runAgentLoop({ cwd, plannerOnly: false });
+    console.log('agent-loop resumed and finished or paused.');
     console.log(summarizeRun(run));
     return;
   }

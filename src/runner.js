@@ -11,16 +11,34 @@ async function appendFile(path, content) {
   await writeFile(path, `${previous}${content}`, 'utf8');
 }
 
+function stalePlannerPlaceholder(phase) {
+  return phase?.id === 'plan' && phase.role === 'planner' && phase.status === 'pending';
+}
+
+function dropStalePlannerPlaceholders(run) {
+  run.phases = (run.phases || []).filter(phase => !stalePlannerPlaceholder(phase));
+}
+
 async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPromptFile }) {
   const startedAt = new Date().toISOString();
+  const normalizedRound = round ?? 0;
+  const phaseIndex = (run.phases || []).findIndex(phase => (
+    phase.role === role
+    && phase.status === 'pending'
+    && (phase.round ?? 0) === normalizedRound
+  ));
   const phase = {
-    id: `${role}-${round ?? 0}`,
+    id: `${role}-${normalizedRound}`,
     role,
-    round: round ?? 0,
+    round: normalizedRound,
     status: 'running',
     startedAt
   };
-  run.phases.push(phase);
+  if (phaseIndex === -1) {
+    run.phases.push(phase);
+  } else {
+    run.phases[phaseIndex] = phase;
+  }
   run.status = 'running';
   run.updatedAt = startedAt;
   await writeRun(run, cwd);
@@ -72,21 +90,40 @@ export async function verifyRunCompletion(cwd = process.cwd(), round = 0) {
 export async function runAgentLoop({
   cwd = process.cwd(),
   prompt,
-  maxRounds = DEFAULT_MAX_ROUNDS,
+  maxRounds,
   models = {},
-  maxTurns = 50,
-  permissionMode = 'acceptEdits',
+  maxTurns,
+  permissionMode,
   plannerOnly = false,
   sdk = {}
 } = {}) {
   let run = await readRun(cwd);
-  if (!run || prompt) {
-    run = await startRun({ prompt, cwd, maxRounds, dryRun: false, models, maxTurns, permissionMode, plannerOnly });
+  const startingNewRun = !run || prompt;
+  if (startingNewRun) {
+    run = await startRun({
+      prompt,
+      cwd,
+      maxRounds: maxRounds ?? DEFAULT_MAX_ROUNDS,
+      dryRun: false,
+      models,
+      maxTurns: maxTurns ?? 50,
+      permissionMode: permissionMode ?? 'acceptEdits',
+      plannerOnly
+    });
+  } else {
+    run.plannerOnly = plannerOnly;
+    run.updatedAt = new Date().toISOString();
+    await writeRun(run, cwd);
   }
+  dropStalePlannerPlaceholders(run);
   await seedHarnessFiles(run, cwd);
   const editablePrompts = await readEditablePrompts(cwd);
+  const effectiveMaxRounds = maxRounds ?? run.maxRounds ?? DEFAULT_MAX_ROUNDS;
+  const effectiveMaxTurns = maxTurns ?? run.maxTurns ?? 50;
+  const effectivePermissionMode = permissionMode ?? run.permissionMode ?? 'acceptEdits';
+  const effectiveModels = { ...run.models, ...models };
 
-  const adapterFor = role => new ClaudeAgentAdapter({ model: models[role], maxTurns, permissionMode, ...sdk });
+  const adapterFor = role => new ClaudeAgentAdapter({ model: effectiveModels[role], maxTurns: effectiveMaxTurns, permissionMode: effectivePermissionMode, ...sdk });
 
   if (!run.phases.some(phase => phase.role === 'planner' && phase.status === 'completed')) {
     await runAgentPhase({
@@ -106,7 +143,7 @@ export async function runAgentLoop({
     return run;
   }
 
-  for (let round = Math.max(1, run.currentRound || 1); round <= maxRounds; round += 1) {
+  for (let round = Math.max(1, run.currentRound || 1); round <= effectiveMaxRounds; round += 1) {
     run.currentRound = round;
     await writeRun(run, cwd);
 
