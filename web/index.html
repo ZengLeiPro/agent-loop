@@ -3,170 +3,115 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>agent-loop</title>
+  <title>agent-loop 控制台</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <main class="shell">
-    <section class="hero">
-      <p class="eyebrow">本地优先的 Agent 编排</p>
-      <h1>agent-loop</h1>
-      <p>在任意本地仓库中运行 Planner → Worker → Judge 循环。</p>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Agent orchestration console</p>
+        <h1>agent-loop 控制台</h1>
+        <p class="lede">在一个浅色工作台里完成任务配置、启动运行、实时观察 Planner → Worker → Judge 循环。</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="refresh" class="button button-secondary" type="button">刷新状态</button>
+        <a class="button button-ghost" href="#prompts">编辑提示语</a>
+      </div>
+    </header>
+
+    <section class="notice" aria-label="运行说明">
+      <strong>运行提示</strong>
+      <span>dry run 只写入本地状态；真实运行会调用 <code>@anthropic-ai/claude-agent-sdk</code>，请先配置依赖与凭据。</span>
     </section>
 
-    <section class="panel warning">
-      <strong>当前实现说明：</strong>
-      dry run 只会创建本地状态。真实运行会调用 <code>@anthropic-ai/claude-agent-sdk</code>，需要先安装依赖并配置好供应商凭据。
+    <section class="workspace" aria-label="Agent loop workspace">
+      <aside class="launch-card" aria-labelledby="launch-title">
+        <div class="section-kicker">01 · Launch</div>
+        <h2 id="launch-title">创建或调整运行</h2>
+        <p class="hint">像 CI/CD runbook 一样先填写目标，再按需展开高级执行参数。</p>
+
+        <label class="field-label" for="prompt">任务描述</label>
+        <textarea id="prompt" required placeholder="例如：重构登录页，补充测试，并提交 PR"></textarea>
+
+        <div class="quick-options">
+          <label class="switch-card">
+            <input id="dryRun" type="checkbox" checked />
+            <span><strong>Dry run 预览</strong><small>只创建状态文件，不调用 SDK</small></span>
+          </label>
+          <label class="switch-card">
+            <input id="plannerOnly" type="checkbox" />
+            <span><strong>Planner 后暂停</strong><small>适合先审阅 spec / PRD</small></span>
+          </label>
+        </div>
+
+        <details class="config-panel" open>
+          <summary>基础执行参数</summary>
+          <div class="form-grid compact-grid">
+            <label>最大轮数<input id="maxRounds" type="number" min="1" step="1" value="30" /></label>
+            <label>每个 Agent 最大 turns<input id="maxTurns" type="number" min="1" step="1" value="50" /></label>
+            <label class="span-2">权限模式<select id="permissionMode">
+              <option value="acceptEdits">acceptEdits：自动接受文件编辑</option>
+              <option value="default">default：按 SDK 默认权限询问</option>
+              <option value="plan">plan：只规划，不执行修改</option>
+              <option value="dontAsk">dontAsk：不弹窗；未预批准就拒绝</option>
+              <option value="auto">auto：由模型分类器自动判断</option>
+              <option value="bypassPermissions">bypassPermissions：跳过权限检查（最 YOLO）</option>
+            </select></label>
+          </div>
+        </details>
+
+        <details class="config-panel">
+          <summary>模型与 SDK 设置</summary>
+          <div class="form-grid compact-grid">
+            <label>Planner 模型<input id="plannerModel" type="text" placeholder="SDK 默认值" /></label>
+            <label>Worker 模型<input id="workerModel" type="text" placeholder="SDK 默认值" /></label>
+            <label>Judge 模型<input id="judgeModel" type="text" placeholder="SDK 默认值" /></label>
+            <label>思考程度 effort<select id="effort"><option value="">SDK 默认值</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
+            <label class="span-2">API 端点<input id="apiEndpoint" type="url" placeholder="未配置则使用 SDK 默认端点" autocomplete="off" /></label>
+            <label>API Key<input id="apiKey" type="password" placeholder="环境或 SDK 登录状态" autocomplete="off" /></label>
+            <label>最大 thinking tokens<input id="maxThinkingTokens" type="number" min="1" step="1" placeholder="SDK 默认值" /></label>
+          </div>
+        </details>
+
+        <details class="permission-help">
+          <summary>权限模式怎么选？</summary>
+          <ul>
+            <li><code>acceptEdits</code>：推荐默认值，自动接受文件编辑。</li>
+            <li><code>plan</code>：只规划，适合安全预览。</li>
+            <li><code>dontAsk</code>：非交互保守运行，未预批准会拒绝。</li>
+            <li><code>bypassPermissions</code>：跳过权限检查，仅限可信环境。</li>
+          </ul>
+        </details>
+
+        <button id="create" class="button button-primary full-width" type="button">启动运行</button>
+      </aside>
+
+      <section class="monitor-card" aria-labelledby="monitor-title">
+        <div class="monitor-heading">
+          <div>
+            <div class="section-kicker">02 · Monitor</div>
+            <h2 id="monitor-title">实时运行视图</h2>
+          </div>
+          <div class="live-pill"><span></span> 自动刷新运行中任务</div>
+        </div>
+        <div id="statusSummary" class="status-summary" role="status" aria-live="polite">加载中…</div>
+        <div id="phaseTimeline" class="phase-timeline"></div>
+        <details class="raw-status"><summary>调试：查看原始 JSON</summary><pre id="status">加载中…</pre></details>
+      </section>
     </section>
 
-    <section class="panel">
+    <section id="prompts" class="prompts-card" aria-labelledby="prompts-title">
       <div class="panel-header">
-        <div>
-          <h2>当前运行状态</h2>
-          <p class="hint">主视图展示人类可读的运行概览；原始 JSON 保留在调试详情中。</p>
-        </div>
-        <button id="refresh">刷新状态</button>
+        <div><div class="section-kicker">03 · Prompt library</div><h2 id="prompts-title">提示语编辑</h2><p class="hint">保存后写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。</p></div>
+        <div class="actions"><button id="loadPrompts" class="button button-secondary" type="button">重新加载提示语</button><button id="savePrompts" class="button button-primary" type="button">保存提示语</button></div>
       </div>
-
-      <div id="statusSummary" class="status-summary" role="status" aria-live="polite">加载中…</div>
-      <div id="phaseTimeline" class="phase-timeline"></div>
-
-      <details class="raw-status">
-        <summary>调试：查看原始 JSON</summary>
-        <pre id="status">加载中…</pre>
-      </details>
-    </section>
-
-    <section class="panel">
-      <h2>创建运行</h2>
-      <label class="field-label" for="prompt">任务描述</label>
-      <textarea id="prompt" required placeholder="描述你希望 agent-loop 规划并执行的任务"></textarea>
-      <div class="form-grid">
-        <label>
-          最大轮数
-          <input id="maxRounds" type="number" min="1" step="1" value="30" />
-        </label>
-        <label>
-          每个 Agent 最大 turns
-          <input id="maxTurns" type="number" min="1" step="1" value="50" />
-        </label>
-        <label>
-          权限模式
-          <select id="permissionMode">
-            <option value="acceptEdits">acceptEdits：自动接受文件编辑</option>
-            <option value="default">default：按 SDK 默认权限询问</option>
-            <option value="plan">plan：只规划，不执行修改</option>
-            <option value="dontAsk">dontAsk：不弹窗；未预批准就拒绝</option>
-            <option value="auto">auto：由模型分类器自动判断</option>
-            <option value="bypassPermissions">bypassPermissions：跳过权限检查（最 YOLO）</option>
-          </select>
-        </label>
-        <label>
-          Planner 模型
-          <input id="plannerModel" type="text" placeholder="使用 SDK 默认值" />
-        </label>
-        <label>
-          Worker 模型
-          <input id="workerModel" type="text" placeholder="使用 SDK 默认值" />
-        </label>
-        <label>
-          Judge 模型
-          <input id="judgeModel" type="text" placeholder="使用 SDK 默认值" />
-        </label>
-        <label>
-          API 端点
-          <input id="apiEndpoint" type="url" placeholder="未配置则使用 SDK 默认端点" autocomplete="off" />
-        </label>
-        <label>
-          API Key
-          <input id="apiKey" type="password" placeholder="未配置则使用环境或 SDK 登录状态" autocomplete="off" />
-        </label>
-        <label>
-          思考程度 effort
-          <select id="effort">
-            <option value="">使用 SDK 默认值</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="xhigh">xhigh</option>
-            <option value="max">max</option>
-          </select>
-        </label>
-        <label>
-          最大 thinking tokens
-          <input id="maxThinkingTokens" type="number" min="1" step="1" placeholder="未配置则使用 SDK 默认值" />
-        </label>
+      <div class="prompt-grid three-col">
+        <label>Planner 系统提示语<textarea id="plannerSystemPrompt" class="prompt-editor"></textarea></label>
+        <label>Worker 系统提示语<textarea id="workerSystemPrompt" class="prompt-editor"></textarea></label>
+        <label>Judge 系统提示语<textarea id="judgeSystemPrompt" class="prompt-editor"></textarea></label>
       </div>
-      <div class="hint permission-help">
-        <strong>权限模式区别：</strong>
-        <span>这些取值来自 <code>@anthropic-ai/claude-agent-sdk</code> 的 <code>PermissionMode</code> 定义。</span>
-        <ul>
-          <li><code>default</code>：SDK 标准权限行为；危险操作会请求确认。</li>
-          <li><code>acceptEdits</code>：自动接受文件编辑，仍保留其他权限控制；这是本 UI 默认值。</li>
-          <li><code>plan</code>：规划模式，不执行实际修改。</li>
-          <li><code>dontAsk</code>：不会弹出权限请求；未预先允许的操作会被拒绝，所以它不是 YOLO，反而更适合无交互/保守运行。</li>
-          <li><code>auto</code>：使用模型分类器自动批准或拒绝权限请求。</li>
-          <li><code>bypassPermissions</code>：跳过全部权限检查；这是最 YOLO 的模式，仅在完全信任运行环境和任务时使用。</li>
-        </ul>
-      </div>
-      <p class="hint">API 端点、API Key、effort、thinking tokens 留空时不会提交给 SDK，继续使用环境变量、登录状态或 SDK 默认值。</p>
-      <div class="option-stack">
-        <label class="check"><input id="dryRun" type="checkbox" checked /> 仅创建 dry run</label>
-        <p class="hint check-help">dry run 只写入本地 <code>.agent-loop/</code> 状态文件，用来预览 run 配置；不会调用 Claude Agent SDK，也不会消耗 API。要真实启动 Planner → Worker → Judge 时再取消勾选。</p>
-        <label class="check"><input id="plannerOnly" type="checkbox" /> Planner 完成后暂停</label>
-        <p class="hint check-help">启用后只让 Planner 生成 spec / PRD，暂停给人工检查；确认后再继续后续 Worker / Judge loop。</p>
-      </div>
-      <button id="create">创建运行</button>
-      <p class="hint">这里的配置会直接提交到运行 API。只有在已经安装依赖并配置好 Claude Agent SDK 凭据后，才建议关闭 dry run。</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>提示语编辑</h2>
-          <p class="hint">通常只需要编辑 Agent 系统提示语；保存后会写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。阶段任务模板属于高级入口，默认折叠。</p>
-        </div>
-        <div class="actions">
-          <button id="loadPrompts">重新加载提示语</button>
-          <button id="savePrompts">保存提示语</button>
-        </div>
-      </div>
-
-      <h3>Agent 系统提示语</h3>
-      <p class="hint">系统提示语定义每个角色“是谁、必须遵守哪些规则”：例如 Planner 如何拆 PRD、Worker 如何提交、Judge 如何判定 PASS / FAIL。它会作为该角色的 system prompt 使用。</p>
-      <div class="prompt-grid">
-        <label>
-          Planner 系统提示语
-          <textarea id="plannerSystemPrompt" class="prompt-editor"></textarea>
-        </label>
-        <label>
-          Worker 系统提示语
-          <textarea id="workerSystemPrompt" class="prompt-editor"></textarea>
-        </label>
-        <label>
-          Judge 系统提示语
-          <textarea id="judgeSystemPrompt" class="prompt-editor"></textarea>
-        </label>
-      </div>
-
-      <details class="advanced-prompts">
-        <summary>高级：阶段任务模板（通常不用改）</summary>
-        <p class="hint">这些模板不是另一套角色规则，而是 orchestrator 每轮发给 Agent 的短任务消息，用来注入用户任务或轮次编号。默认模板只做最小调度；除非你要改 loop 协议或占位符传递方式，否则保持默认即可。可使用占位符：<code>{{prompt}}</code> 表示用户任务，<code>{{round}}</code> 表示当前轮次。</p>
-        <div class="prompt-grid">
-          <label>
-            Planner 任务提示语
-            <textarea id="plannerPhasePrompt" class="prompt-editor"></textarea>
-          </label>
-          <label>
-            Worker 任务提示语
-            <textarea id="workerPhasePrompt" class="prompt-editor"></textarea>
-          </label>
-          <label>
-            Judge 任务提示语
-            <textarea id="judgePhasePrompt" class="prompt-editor"></textarea>
-          </label>
-        </div>
-      </details>
+      <details class="advanced-prompts"><summary>高级：阶段任务模板</summary><p class="hint">可使用占位符：<code>{{prompt}}</code> 表示用户任务，<code>{{round}}</code> 表示当前轮次。</p><div class="prompt-grid three-col"><label>Planner 任务提示语<textarea id="plannerPhasePrompt" class="prompt-editor"></textarea></label><label>Worker 任务提示语<textarea id="workerPhasePrompt" class="prompt-editor"></textarea></label><label>Judge 任务提示语<textarea id="judgePhasePrompt" class="prompt-editor"></textarea></label></div></details>
     </section>
   </main>
   <script src="/app.js" type="module"></script>
