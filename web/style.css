@@ -54,7 +54,7 @@ h1 {
   align-items: center;
 }
 
-pre, textarea {
+pre, textarea, input {
   box-sizing: border-box;
   width: 100%;
   border: 1px solid rgb(148 163 184 / 30%);
@@ -73,6 +73,25 @@ textarea {
   min-height: 120px;
   padding: 14px;
   resize: vertical;
+}
+
+input {
+  padding: 10px 12px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #cbd5e1;
+  font-weight: 700;
 }
 
 button {
@@ -105,4 +124,38 @@ button:hover {
   gap: 8px;
   margin-top: 12px;
   color: #cbd5e1;
+}
+
+h3 {
+  margin: 24px 0 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.prompt-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.prompt-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.prompt-editor {
+  min-height: 150px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.5;
+}
+
+code {
+  color: #bfdbfe;
 }

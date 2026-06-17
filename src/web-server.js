@@ -2,11 +2,15 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRun, startRun, stateDir } from './core.js';
+import { DEFAULT_MAX_ROUNDS, readRun, startRun, stateDir } from './core.js';
 import { runAgentLoop } from './runner.js';
+import { readEditablePrompts, writeEditablePrompts } from './prompts.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = resolve(__dirname, '../web');
+
+const DEFAULT_MAX_TURNS = 50;
+const DEFAULT_PERMISSION_MODE = 'acceptEdits';
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -26,6 +30,21 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function positiveInteger(value, fallback, name) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer.`);
+  return number;
+}
+
+function cleanModels(models = {}) {
+  return Object.fromEntries(
+    ['planner', 'worker', 'judge']
+      .map(role => [role, typeof models[role] === 'string' && models[role].trim() ? models[role].trim() : undefined])
+      .filter(([, model]) => model)
+  );
+}
+
 export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
   return createServer(async (req, res) => {
     try {
@@ -34,11 +53,39 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
         const run = await readRun(cwd);
         return json(res, 200, { cwd, stateDir: stateDir(cwd), run });
       }
+      if (url.pathname === '/api/prompts' && req.method === 'GET') {
+        return json(res, 200, await readEditablePrompts(cwd));
+      }
+      if (url.pathname === '/api/prompts' && req.method === 'PUT') {
+        const body = JSON.parse(await readBody(req) || '{}');
+        return json(res, 200, await writeEditablePrompts({
+          cwd,
+          systemPrompts: body.systemPrompts,
+          phasePrompts: body.phasePrompts
+        }));
+      }
       if (url.pathname === '/api/run' && req.method === 'POST') {
         const body = JSON.parse(await readBody(req) || '{}');
+        const options = {
+          prompt: body.prompt,
+          cwd,
+          maxRounds: positiveInteger(body.maxRounds, DEFAULT_MAX_ROUNDS, 'maxRounds'),
+          maxTurns: positiveInteger(body.maxTurns, DEFAULT_MAX_TURNS, 'maxTurns'),
+          permissionMode: typeof body.permissionMode === 'string' && body.permissionMode.trim()
+            ? body.permissionMode.trim()
+            : DEFAULT_PERMISSION_MODE,
+          plannerOnly: Boolean(body.plannerOnly),
+          models: cleanModels(body.models)
+        };
         const run = body.dryRun !== false
-          ? await startRun({ prompt: body.prompt, cwd, dryRun: true })
-          : await runAgentLoop({ prompt: body.prompt, cwd });
+          ? await startRun({ ...options, dryRun: true })
+          : await runAgentLoop({
+              ...options,
+              maxTurns: options.maxTurns,
+              permissionMode: options.permissionMode,
+              plannerOnly: options.plannerOnly,
+              models: options.models
+            });
         return json(res, 201, { run });
       }
       const safePath = url.pathname === '/' ? '/index.html' : url.pathname;

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,30 +9,103 @@
 <body>
   <main class="shell">
     <section class="hero">
-      <p class="eyebrow">Local-first agent orchestration</p>
+      <p class="eyebrow">本地优先的 Agent 编排</p>
       <h1>agent-loop</h1>
-      <p>Run a simple Planner → Worker → Judge loop from any local repository.</p>
+      <p>在任意本地仓库中运行 Planner → Worker → Judge 循环。</p>
     </section>
 
     <section class="panel warning">
-      <strong>Current implementation note:</strong>
-      dry runs only create local state. Live runs call <code>@anthropic-ai/claude-agent-sdk</code> and require dependencies and provider credentials to be configured.
+      <strong>当前实现说明：</strong>
+      dry run 只会创建本地状态。真实运行会调用 <code>@anthropic-ai/claude-agent-sdk</code>，需要先安装依赖并配置好供应商凭据。
     </section>
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Current run</h2>
-        <button id="refresh">Refresh</button>
+        <h2>当前运行状态</h2>
+        <button id="refresh">刷新状态</button>
       </div>
-      <pre id="status">Loading…</pre>
+      <pre id="status">加载中…</pre>
     </section>
 
     <section class="panel">
-      <h2>Create run</h2>
-      <textarea id="prompt" placeholder="Describe the task you want agent-loop to plan and execute"></textarea>
-      <label class="check"><input id="dryRun" type="checkbox" checked /> Dry run only</label>
-      <button id="create">Create run</button>
-      <p class="hint">Uncheck dry run only if you have installed dependencies and configured Claude Agent SDK credentials.</p>
+      <h2>创建运行</h2>
+      <textarea id="prompt" placeholder="描述你希望 agent-loop 规划并执行的任务"></textarea>
+      <div class="form-grid">
+        <label>
+          最大轮数
+          <input id="maxRounds" type="number" min="1" step="1" value="30" />
+        </label>
+        <label>
+          每个 Agent 最大 turns
+          <input id="maxTurns" type="number" min="1" step="1" value="50" />
+        </label>
+        <label>
+          权限模式
+          <input id="permissionMode" type="text" value="acceptEdits" />
+        </label>
+        <label>
+          Planner 模型
+          <input id="plannerModel" type="text" placeholder="使用 SDK 默认值" />
+        </label>
+        <label>
+          Worker 模型
+          <input id="workerModel" type="text" placeholder="使用 SDK 默认值" />
+        </label>
+        <label>
+          Judge 模型
+          <input id="judgeModel" type="text" placeholder="使用 SDK 默认值" />
+        </label>
+      </div>
+      <label class="check"><input id="dryRun" type="checkbox" checked /> 仅创建 dry run</label>
+      <label class="check"><input id="plannerOnly" type="checkbox" /> Planner 完成后暂停</label>
+      <button id="create">创建运行</button>
+      <p class="hint">这里的配置会直接提交到运行 API。只有在已经安装依赖并配置好 Claude Agent SDK 凭据后，才建议关闭 dry run。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>提示语编辑</h2>
+          <p class="hint">可编辑所有 Agent 的系统提示语，以及每个阶段发送给 Agent 的底层任务提示语。保存后会写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。</p>
+        </div>
+        <div class="actions">
+          <button id="loadPrompts">重新加载提示语</button>
+          <button id="savePrompts">保存提示语</button>
+        </div>
+      </div>
+
+      <h3>Agent 系统提示语</h3>
+      <div class="prompt-grid">
+        <label>
+          Planner 系统提示语
+          <textarea id="plannerSystemPrompt" class="prompt-editor"></textarea>
+        </label>
+        <label>
+          Worker 系统提示语
+          <textarea id="workerSystemPrompt" class="prompt-editor"></textarea>
+        </label>
+        <label>
+          Judge 系统提示语
+          <textarea id="judgeSystemPrompt" class="prompt-editor"></textarea>
+        </label>
+      </div>
+
+      <h3>底层任务提示语模板</h3>
+      <p class="hint">可使用占位符：<code>{{prompt}}</code> 表示用户任务，<code>{{round}}</code> 表示当前轮次。</p>
+      <div class="prompt-grid">
+        <label>
+          Planner 任务提示语
+          <textarea id="plannerPhasePrompt" class="prompt-editor"></textarea>
+        </label>
+        <label>
+          Worker 任务提示语
+          <textarea id="workerPhasePrompt" class="prompt-editor"></textarea>
+        </label>
+        <label>
+          Judge 任务提示语
+          <textarea id="judgePhasePrompt" class="prompt-editor"></textarea>
+        </label>
+      </div>
     </section>
   </main>
   <script src="/app.js" type="module"></script>
