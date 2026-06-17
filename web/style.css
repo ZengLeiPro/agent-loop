@@ -117,9 +117,23 @@ button:hover {
   color: #94a3b8;
 }
 
+.permission-help {
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.permission-help ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
 .warning {
   border-color: rgb(251 191 36 / 45%);
   background: rgb(120 53 15 / 35%);
+}
+
+.option-stack {
+  margin-top: 14px;
 }
 
 .check {
@@ -135,8 +149,30 @@ button:hover {
   width: auto;
 }
 
+.check-help {
+  margin: 4px 0 0 28px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 h3 {
   margin: 24px 0 12px;
+}
+
+.advanced-prompts {
+  margin-top: 24px;
+  border-top: 1px solid rgb(148 163 184 / 18%);
+  padding-top: 16px;
+}
+
+.advanced-prompts summary {
+  color: #cbd5e1;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.advanced-prompts[open] summary {
+  margin-bottom: 12px;
 }
 
 .actions {
