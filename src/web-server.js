@@ -11,6 +11,7 @@ const webRoot = resolve(__dirname, '../web');
 
 const DEFAULT_MAX_TURNS = 50;
 const DEFAULT_PERMISSION_MODE = 'acceptEdits';
+const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions']);
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 const contentTypes = {
@@ -57,6 +58,17 @@ function optionalPositiveInteger(value, name) {
   return number;
 }
 
+<<<<<<< HEAD
+=======
+function optionalPermissionMode(value) {
+  const permissionMode = optionalStringValue(value) || DEFAULT_PERMISSION_MODE;
+  if (!PERMISSION_MODES.has(permissionMode)) {
+    throw new Error('permissionMode must be one of: default, acceptEdits, plan, dontAsk, auto, bypassPermissions.');
+  }
+  return permissionMode;
+}
+
+>>>>>>> 54d6ed9 (fix: collapse advanced phase prompts)
 function optionalEffort(value) {
   const effort = optionalStringValue(value);
   if (!effort) return undefined;
@@ -101,9 +113,7 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
           cwd,
           maxRounds: positiveInteger(body.maxRounds, DEFAULT_MAX_ROUNDS, 'maxRounds'),
           maxTurns: positiveInteger(body.maxTurns, DEFAULT_MAX_TURNS, 'maxTurns'),
-          permissionMode: typeof body.permissionMode === 'string' && body.permissionMode.trim()
-            ? body.permissionMode.trim()
-            : DEFAULT_PERMISSION_MODE,
+          permissionMode: optionalPermissionMode(body.permissionMode),
           plannerOnly: Boolean(body.plannerOnly),
           models: cleanModels(body.models),
           sdk: cleanSdkOptions(body.sdk)

@@ -50,6 +50,7 @@ export class ClaudeAgentAdapter {
       systemPrompt,
       maxTurns: this.maxTurns,
       permissionMode: this.permissionMode,
+      ...(this.permissionMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
       allowedTools: this.allowedTools,
       ...(this.model ? { model: this.model } : {}),
       ...(this.effort ? { effort: this.effort } : {}),
