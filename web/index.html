@@ -21,15 +21,26 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>当前运行状态</h2>
+        <div>
+          <h2>当前运行状态</h2>
+          <p class="hint">主视图展示人类可读的运行概览；原始 JSON 保留在调试详情中。</p>
+        </div>
         <button id="refresh">刷新状态</button>
       </div>
-      <pre id="status">加载中…</pre>
+
+      <div id="statusSummary" class="status-summary" role="status" aria-live="polite">加载中…</div>
+      <div id="phaseTimeline" class="phase-timeline"></div>
+
+      <details class="raw-status">
+        <summary>调试：查看原始 JSON</summary>
+        <pre id="status">加载中…</pre>
+      </details>
     </section>
 
     <section class="panel">
       <h2>创建运行</h2>
-      <textarea id="prompt" placeholder="描述你希望 agent-loop 规划并执行的任务"></textarea>
+      <label class="field-label" for="prompt">任务描述</label>
+      <textarea id="prompt" required placeholder="描述你希望 agent-loop 规划并执行的任务"></textarea>
       <div class="form-grid">
         <label>
           最大轮数

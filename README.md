@@ -37,13 +37,17 @@
 npm install
 node ./bin/agent-loop.js --help
 node ./bin/agent-loop.js init
+node ./bin/agent-loop.js init --cwd /path/to/target-repo
 node ./bin/agent-loop.js run "Add a small feature" --dry-run
 node ./bin/agent-loop.js run "Add a small feature" --planner-only
 node ./bin/agent-loop.js run "Add a small feature" --planner-model claude-opus-4-1 --worker-model claude-sonnet-4-5 --judge-model claude-opus-4-1 --permission-mode acceptEdits
 node ./bin/agent-loop.js verify
 node ./bin/agent-loop.js status
 node ./bin/agent-loop.js ui
+node ./bin/agent-loop.js ui --cwd /path/to/target-repo
 ```
+
+默认情况下，CLI 和 Web UI 会把启动命令时的当前目录作为目标项目目录；也可以用 `--cwd /path/to/target-repo` 在运行前明确选择目标项目目录，无需先 `cd`。
 
 然后打开 <http://127.0.0.1:4317>。简体中文 UI 暴露了与 CLI 相同的核心运行配置：最大轮数、最大 turns、权限模式、仅 Planner 模式，以及 Planner/Worker/Judge 模型覆盖。这些值会提交到 `/api/run`，并持久化到创建运行的 `.agent-loop/run.json` 中。提示语编辑器会加载并保存 `.agent-loop/prompts/` 下的可编辑提示语文件；保存后的 agent 系统提示语和阶段任务提示语模板会被后续真实运行使用。
 

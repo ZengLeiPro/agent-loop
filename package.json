@@ -9,9 +9,11 @@
   },
   "scripts": {
     "start": "node ./bin/agent-loop.js ui",
-    "check": "node --check ./bin/agent-loop.js && node --check ./src/cli.js && node --check ./src/core.js && node --check ./src/prompts.js && node --check ./src/claude-agent-adapter.js && node --check ./src/runner.js && node --check ./src/web-server.js",
+    "check": "node --check ./bin/agent-loop.js && node --check ./src/cli.js && node --check ./src/core.js && node --check ./src/prompts.js && node --check ./src/claude-agent-adapter.js && node --check ./src/runner.js && node --check ./src/web-server.js && node --check ./web/app.js && node --check ./scripts/check-state-protocol.js && npm run check:state-protocol",
     "smoke": "node ./bin/agent-loop.js --help",
-    "verify": "node ./bin/agent-loop.js verify"
+    "verify": "node ./bin/agent-loop.js verify",
+    "check:state-protocol": "node ./scripts/check-state-protocol.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
