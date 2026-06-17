@@ -58,8 +58,6 @@ function optionalPositiveInteger(value, name) {
   return number;
 }
 
-<<<<<<< HEAD
-=======
 function optionalPermissionMode(value) {
   const permissionMode = optionalStringValue(value) || DEFAULT_PERMISSION_MODE;
   if (!PERMISSION_MODES.has(permissionMode)) {
@@ -68,7 +66,6 @@ function optionalPermissionMode(value) {
   return permissionMode;
 }
 
->>>>>>> 54d6ed9 (fix: collapse advanced phase prompts)
 function optionalEffort(value) {
   const effort = optionalStringValue(value);
   if (!effort) return undefined;
