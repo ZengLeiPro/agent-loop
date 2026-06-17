@@ -54,7 +54,7 @@ h1 {
   align-items: center;
 }
 
-pre, textarea, input {
+pre, textarea, input, select {
   box-sizing: border-box;
   width: 100%;
   border: 1px solid rgb(148 163 184 / 30%);
@@ -75,8 +75,12 @@ textarea {
   resize: vertical;
 }
 
-input {
+input, select {
   padding: 10px 12px;
+}
+
+select {
+  appearance: none;
 }
 
 .form-grid {
@@ -124,6 +128,11 @@ button:hover {
   gap: 8px;
   margin-top: 12px;
   color: #cbd5e1;
+}
+
+.check input {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 h3 {

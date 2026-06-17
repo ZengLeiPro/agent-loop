@@ -13,9 +13,9 @@ export const PHASE_PROMPT_KEYS = ['planner', 'worker', 'judge'];
 export const PHASE_PROMPTS_FILE = 'phase-prompts.json';
 
 export const DEFAULT_PHASE_PROMPTS = {
-  planner: 'Create .agent-loop/spec.md and .agent-loop/prd.json for this request:\n\n{{prompt}}',
-  worker: 'Round {{round}}. Read .agent-loop/spec.md and .agent-loop/prd.json. Implement exactly one unfinished story, update bookkeeping, and commit.',
-  judge: 'Round {{round}}. Audit the latest worker round and write .agent-loop/judge-{{round}}.md ending in VERDICT: PASS or VERDICT: FAIL.'
+  planner: '请为以下请求创建 .agent-loop/spec.md 和 .agent-loop/prd.json：\n\n{{prompt}}',
+  worker: 'Round {{round}}. 阅读 .agent-loop/spec.md 和 .agent-loop/prd.json。只实现一个未完成 story，更新 bookkeeping，并 commit。',
+  judge: 'Round {{round}}. 审计最新 worker round，写入 .agent-loop/judge-{{round}}.md，并以 VERDICT: PASS 或 VERDICT: FAIL 结尾。'
 };
 
 function rolePromptFile(cwd, role) {

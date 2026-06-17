@@ -8,6 +8,10 @@ const permissionModeEl = document.querySelector('#permissionMode');
 const plannerModelEl = document.querySelector('#plannerModel');
 const workerModelEl = document.querySelector('#workerModel');
 const judgeModelEl = document.querySelector('#judgeModel');
+const apiEndpointEl = document.querySelector('#apiEndpoint');
+const apiKeyEl = document.querySelector('#apiKey');
+const effortEl = document.querySelector('#effort');
+const maxThinkingTokensEl = document.querySelector('#maxThinkingTokens');
 const refreshButton = document.querySelector('#refresh');
 const createButton = document.querySelector('#create');
 const loadPromptsButton = document.querySelector('#loadPrompts');
@@ -116,6 +120,12 @@ async function createRun() {
           planner: optionalString(plannerModelEl),
           worker: optionalString(workerModelEl),
           judge: optionalString(judgeModelEl)
+        },
+        sdk: {
+          apiEndpoint: optionalString(apiEndpointEl),
+          apiKey: optionalString(apiKeyEl),
+          effort: optionalString(effortEl),
+          maxThinkingTokens: optionalNumber(maxThinkingTokensEl)
         }
       })
     });
