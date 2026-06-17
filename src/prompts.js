@@ -34,12 +34,21 @@ async function ensureParent(path) {
   await mkdir(dirname(path), { recursive: true });
 }
 
+async function migrateLegacyPromptProtocol(path) {
+  const text = await readFile(path, 'utf8');
+  const legacyStateDirPattern = new RegExp('\\.' + 'harness', 'g');
+  const migrated = text.replace(legacyStateDirPattern, '.agent-loop');
+  if (migrated !== text) await writeFile(path, migrated, 'utf8');
+}
+
 export async function ensureEditablePrompts(cwd = process.cwd()) {
   for (const role of PROMPT_ROLES) {
     const localPath = rolePromptFile(cwd, role);
     if (!existsSync(localPath)) {
       await ensureParent(localPath);
       await writeFile(localPath, await readFile(bundledPromptFile(role), 'utf8'), 'utf8');
+    } else {
+      await migrateLegacyPromptProtocol(localPath);
     }
   }
 

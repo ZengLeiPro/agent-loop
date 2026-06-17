@@ -52,7 +52,8 @@ export async function verifyRunCompletion(cwd = process.cwd(), round = 0) {
   const judgePath = join(dir, `judge-${round}.md`);
 
   const progress = existsSync(progressPath) ? await readFile(progressPath, 'utf8') : '';
-  const sentinelOk = /<promise>\s*COMPLETE\s*<\/promise>/i.test(progress);
+  const progressLastLine = progress.trimEnd().split(/\r?\n/).at(-1) || '';
+  const sentinelOk = /^<promise>\s*COMPLETE\s*<\/promise>$/i.test(progressLastLine);
 
   let passCountOk = false;
   if (existsSync(prdPath)) {
