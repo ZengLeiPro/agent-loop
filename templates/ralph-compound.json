@@ -1,0 +1,24 @@
+{
+  "id": "ralph-compound",
+  "version": 1,
+  "name": "Ralph Compound (Planner / Worker / Judge)",
+  "description": "A local-first Planner → Worker → Judge loop for small, auditable implementation rounds.",
+  "roles": {
+    "planner": { "promptFile": "planner.md" },
+    "worker": { "promptFile": "worker.md" },
+    "judge": { "promptFile": "judge.md" }
+  },
+  "loop": {
+    "mode": "ralph",
+    "workerStepId": "worker",
+    "judgeStepId": "judge",
+    "progressFile": ".agent-loop/progress.txt",
+    "agentsFile": ".agent-loop/AGENTS.md",
+    "completionSentinel": "<promise>\\s*(COMPLETE)\\s*</promise>",
+    "judgeFile": ".agent-loop/judge-{{round}}.md",
+    "judgeVerdictPattern": "VERDICT\\s*:\\s*(PASS|FAIL)",
+    "verificationMode": "both",
+    "judgeRequired": true,
+    "maxRounds": 30
+  }
+}

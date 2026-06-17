@@ -1,0 +1,23 @@
+{
+  "name": "agent-loop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first Agent Loop runner with a bundled lightweight web UI.",
+  "type": "module",
+  "bin": {
+    "agent-loop": "./bin/agent-loop.js"
+  },
+  "scripts": {
+    "start": "node ./bin/agent-loop.js ui",
+    "check": "node --check ./bin/agent-loop.js && node --check ./src/cli.js && node --check ./src/core.js && node --check ./src/claude-agent-adapter.js && node --check ./src/runner.js && node --check ./src/web-server.js",
+    "smoke": "node ./bin/agent-loop.js --help",
+    "verify": "node ./bin/agent-loop.js verify"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.177"
+  },
+  "license": "UNLICENSED"
+}

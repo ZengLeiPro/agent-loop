@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>agent-loop</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Local-first agent orchestration</p>
+      <h1>agent-loop</h1>
+      <p>Run a simple Planner → Worker → Judge loop from any local repository.</p>
+    </section>
+
+    <section class="panel warning">
+      <strong>Current implementation note:</strong>
+      dry runs only create local state. Live runs call <code>@anthropic-ai/claude-agent-sdk</code> and require dependencies and provider credentials to be configured.
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Current run</h2>
+        <button id="refresh">Refresh</button>
+      </div>
+      <pre id="status">Loading…</pre>
+    </section>
+
+    <section class="panel">
+      <h2>Create run</h2>
+      <textarea id="prompt" placeholder="Describe the task you want agent-loop to plan and execute"></textarea>
+      <label class="check"><input id="dryRun" type="checkbox" checked /> Dry run only</label>
+      <button id="create">Create run</button>
+      <p class="hint">Uncheck dry run only if you have installed dependencies and configured Claude Agent SDK credentials.</p>
+    </section>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
