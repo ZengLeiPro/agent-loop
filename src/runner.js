@@ -75,7 +75,8 @@ export async function runAgentLoop({
   models = {},
   maxTurns = 50,
   permissionMode = 'acceptEdits',
-  plannerOnly = false
+  plannerOnly = false,
+  sdk = {}
 } = {}) {
   let run = await readRun(cwd);
   if (!run || prompt) {
@@ -84,7 +85,7 @@ export async function runAgentLoop({
   await seedHarnessFiles(run, cwd);
   const editablePrompts = await readEditablePrompts(cwd);
 
-  const adapterFor = role => new ClaudeAgentAdapter({ model: models[role], maxTurns, permissionMode });
+  const adapterFor = role => new ClaudeAgentAdapter({ model: models[role], maxTurns, permissionMode, ...sdk });
 
   if (!run.phases.some(phase => phase.role === 'planner' && phase.status === 'completed')) {
     await runAgentPhase({
