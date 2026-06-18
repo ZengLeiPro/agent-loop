@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node ./bin/agent-loop.js ui",
-    "check": "node --check ./bin/agent-loop.js && node --check ./src/cli.js && node --check ./src/core.js && node --check ./src/prompts.js && node --check ./src/claude-agent-adapter.js && node --check ./src/runner.js && node --check ./src/web-server.js && node --check ./web/app.js && node --check ./scripts/check-state-protocol.js && npm run check:state-protocol",
+    "check": "node --check ./bin/agent-loop.js && node --check ./src/cli.js && node --check ./src/core.js && node --check ./src/prompts.js && node --check ./src/claude-agent-adapter.js && node --check ./src/control.js && node --check ./src/events.js && node --check ./src/evidence.js && node --check ./src/git-safety.js && node --check ./src/policy.js && node --check ./src/runner.js && node --check ./src/validation.js && node --check ./src/web-server.js && node --check ./web/app.js && node --check ./scripts/check-state-protocol.js && npm run check:state-protocol",
     "smoke": "node ./bin/agent-loop.js --help",
     "verify": "node ./bin/agent-loop.js verify",
     "check:state-protocol": "node ./scripts/check-state-protocol.js",

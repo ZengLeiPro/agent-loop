@@ -17,7 +17,11 @@ export function runFile(cwd = process.cwd()) {
 }
 
 export async function ensureStateDir(cwd = process.cwd()) {
-  await mkdir(join(stateDir(cwd), 'logs'), { recursive: true });
+  await Promise.all([
+    mkdir(join(stateDir(cwd), 'logs'), { recursive: true }),
+    mkdir(join(stateDir(cwd), 'diffs'), { recursive: true }),
+    mkdir(join(stateDir(cwd), 'evidence'), { recursive: true })
+  ]);
 }
 
 export async function readRun(cwd = process.cwd()) {

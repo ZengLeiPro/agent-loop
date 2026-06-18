@@ -15,7 +15,7 @@ export const PHASE_PROMPTS_FILE = 'phase-prompts.json';
 export const DEFAULT_PHASE_PROMPTS = {
   planner: '请为以下请求创建 .agent-loop/spec.md 和 .agent-loop/prd.json：\n\n{{prompt}}',
   worker: 'Round {{round}}. 阅读 .agent-loop/spec.md 和 .agent-loop/prd.json。只实现一个未完成 story，更新 bookkeeping，并 commit。',
-  judge: 'Round {{round}}. 审计最新 worker round，写入 .agent-loop/judge-{{round}}.md，并以 VERDICT: PASS 或 VERDICT: FAIL 结尾。'
+  judge: 'Round {{round}}. 审计最新 worker round，写入 .agent-loop/judge-{{round}}.md，并以 VERDICT: PASS 或 VERDICT: FAIL 结尾；如可行，同时写入结构化 .agent-loop/judge-{{round}}.json（包含 verdict 字段）。'
 };
 
 function rolePromptFile(cwd, role) {

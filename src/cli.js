@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { initProject, readRun, startRun, summarizeRun } from './core.js';
 import { runAgentLoop, verifyRunCompletion } from './runner.js';
 import { serve } from './web-server.js';
+import { validateRunOptions } from './validation.js';
 
 function printHelp() {
   console.log([
@@ -66,29 +67,26 @@ export async function main(args) {
     return;
   }
   if (command === 'run') {
-    const maxRounds = Number(readFlag(rest, '--max-rounds', '30'));
-    const maxTurns = Number(readFlag(rest, '--max-turns', '50'));
-    const permissionMode = readFlag(rest, '--permission-mode', 'acceptEdits');
     const prompt = stripFlags(
       rest,
       new Set(['--cwd', '--max-rounds', '--max-turns', '--planner-model', '--worker-model', '--judge-model', '--permission-mode']),
       new Set(['--dry-run', '--planner-only'])
     ).join(' ');
+    const options = validateRunOptions({
+      prompt,
+      maxRounds: readFlag(rest, '--max-rounds', '30'),
+      maxTurns: readFlag(rest, '--max-turns', '50'),
+      permissionMode: readFlag(rest, '--permission-mode', 'acceptEdits'),
+      plannerOnly: rest.includes('--planner-only'),
+      models: modelFlags(rest)
+    }, { cwd });
     if (rest.includes('--dry-run')) {
-      const run = await startRun({ prompt, cwd, maxRounds, dryRun: true });
+      const run = await startRun({ ...options, dryRun: true });
       console.log('Created agent-loop dry run.');
       console.log(summarizeRun(run));
       return;
     }
-    const run = await runAgentLoop({
-      cwd,
-      prompt,
-      maxRounds,
-      maxTurns,
-      permissionMode,
-      plannerOnly: rest.includes('--planner-only'),
-      models: modelFlags(rest)
-    });
+    const run = await runAgentLoop(options);
     console.log('agent-loop run finished or paused.');
     console.log(summarizeRun(run));
     return;

@@ -12,22 +12,26 @@
 
 ## 当前状态
 
-项目仍处于早期实现阶段，但已经不再只是状态脚手架：
+项目已经从早期脚手架推进为一个可观察、可审计的本地 Agent Loop 控制台：
 
 - 依赖较少的 Node.js CLI；
 - 本地 HTTP 服务器与内置静态 Web UI；
 - 本地运行状态创建；
 - 内置 Ralph Compound 风格模板与提示语占位文件；
 - 初始 `@anthropic-ai/claude-agent-sdk` 适配器；
-- 初始 Planner → Worker → Judge runner 循环；
-- 基于 sentinel、PRD pass 计数和 Judge verdict 的完成校验。
+- Planner → Worker → Judge runner 循环；
+- 基于 sentinel、PRD pass 计数和 Judge verdict 的完成校验；
+- 后台 Web job manager，让真实运行从 `/api/run` 长请求拆为可轮询/可观察的后台任务；
+- `.agent-loop/events.ndjson` 事件流和 `/api/events` SSE/JSON backlog；
+- Git preflight、逐轮 Worker diff/evidence 归档、结构化 Judge verdict JSON；
+- Web Autopilot 等级、run controls、Live events、Quality Gate、Changes/Evidence 和 PRD stories summary。
 
 重要限制：
 
 - 拆分或 checkout 项目后，真实运行需要先在本目录执行 `npm install`。
 - 真实运行需要 Claude Agent SDK 凭据，以及本地 SDK 设置所需的工具权限。
-- Git 安全检查、回滚、长任务暂停/取消，以及健壮的逐轮 diff review 仍是下一步工作。
-- Web UI 已本地化为简体中文，可以启动真实运行，也可以传递运行配置（轮次/turn 限制、权限模式、仅 Planner 模式、各角色模型），能在 Planner 后暂停时审阅并修改 `.agent-loop/spec.md` / `.agent-loop/prd.json` 后继续运行，并能编辑后续运行使用的本地 agent/system 提示语和阶段提示语模板。长时间真实执行目前仍是一次简单 HTTP 请求，而不是带流式日志的后台任务队列。
+- Git safety 目前记录 preflight、dirty-tree 风险、diff stat、patch 和 evidence；自动分支/worktree、自动 PR 创建、CI 反馈修复和一键 rollback 仍是后续增强。
+- Web UI 已本地化为简体中文，可以启动真实运行，也可以传递运行配置（轮次/turn 限制、权限模式、仅 Planner 模式、各角色模型），能在 Planner 后暂停时审阅并修改 `.agent-loop/spec.md` / `.agent-loop/prd.json` 后继续运行，并能编辑后续运行使用的本地 agent/system 提示语和阶段提示语模板。真实运行现在由后台 job 承载，并通过事件流、状态轮询和 evidence API 暴露进度。
 
 ## 使用方法
 
@@ -72,6 +76,15 @@ npm start
   progress.txt
   judge-<round>.md
   logs/
+    verification.log
+  diffs/
+    worker-<round>-after.patch
+  evidence/
+    git-preflight.json
+    worker-<round>-git-after.json
+  events.ndjson
+  control.json
+  judge-<round>.json
   prompts/
     planner.md
     worker.md
@@ -81,19 +94,16 @@ npm start
 
 ## 当前可迭代方向
 
-1. 校验并收紧 Claude Agent SDK 的默认权限与工具策略，确保符合真实运行环境的安全要求。
-2. 增加 Git 安全检查、每轮提交记录、diff 归档与回滚能力，降低自动修改代码时的风险。
-3. 完善 pause/cancel 命令和后台状态机，支持长任务中断与取消。
-4. 将 Web 端真实运行从单次长 HTTP 请求改造成后台任务队列，并提供流式日志、进度和错误展示。
-5. 为完成校验、失败恢复、PRD 解析、Judge verdict 提取和 prompt 渲染补充自动化测试。
-6. 强化运行观测性：记录每个角色的输入、输出摘要、耗时、成本、会话 ID 和失败原因。
-7. 改进配置体验：为权限模式、模型名和运行参数提供枚举/校验/默认值说明，避免无效配置进入运行。
-8. 完善文档与示例：补充真实运行前置条件、凭据配置、常见故障排查，以及一个端到端 dry run/真实 run 示例。
+1. 将 Git safety 从 evidence 记录增强为自动 branch/worktree、逐轮 commit checkpoint 和一键 rollback。
+2. 将 pause/cancel 从 after-phase 控制标记增强为 SDK 级中断、阶段重试和失败恢复状态机。
+3. 为 PRD、Judge verdict、evidence、events 和 run state 补充更严格 schema 与迁移机制。
+4. 接入 GitHub/GitLab PR、CI 状态、review comments 和内部 ticket 系统。
+5. 增强 policy engine：按路径、命令、CODEOWNERS、secret/迁移风险决定是否需要人工介入。
+6. 建立自动化度量：无需人工介入率、平均轮次、Judge FAIL 自动修复率、自动 PR merge rate 和返工率。
 
-## 已规划的下一步
+## 已完成的里程碑
 
-1. 校验默认 Claude Agent SDK 权限/工具策略是否匹配准确的内部环境。
-2. 增加 Git 安全检查和逐轮 commit/diff 跟踪。
-3. 完善 pause/cancel 命令与后台状态机。
-4. 将 Web 真实执行改造成带流式日志的后台任务。
-5. 增加围绕完成校验和 loop 恢复的测试。
+1. **可信本地运行基础**：共享参数校验、请求体限制、静态路径安全、非 loopback API token、run control marker、role-based tools 和 Git preflight。
+2. **可观察后台运行**：Web job manager、`/api/events` SSE/JSON backlog、append-only events、Agent SDK event 持久化和 Live events UI。
+3. **自动交付小变更基础**：Worker 前后 Git evidence、diff patch 归档、结构化 Judge verdict、Quality Gate、Changes/Evidence API 与 UI。
+4. **内部平台化入口**：Autopilot 等级、PRD stories summary、独立 toast、run controls，以及为后续 PR/CI/policy 集成预留的 artifact/event 协议。
