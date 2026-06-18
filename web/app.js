@@ -98,6 +98,7 @@ let eventSource;
 let eventPollingTimer;
 let lastStatusData;
 let syntheticEventKey = '';
+const seenEventKeys = new Set();
 
 const promptFields = {
   systemPrompts: {
@@ -367,12 +368,16 @@ function normalizeEvent(raw, source = 'event') {
     message: event.message || event.note || event.text || event.status || JSON.stringify(event),
     timestamp: event.timestamp || event.createdAt || event.time || new Date().toISOString(),
     role: event.role,
-    round: event.round
+    round: event.round,
+    id: event.id
   };
 }
 
 function appendEvent(raw, source) {
   const event = normalizeEvent(raw, source);
+  const key = event.id || `${event.timestamp}:${event.type}:${event.role || ''}:${event.round || ''}:${event.message}`;
+  if (seenEventKeys.has(key)) return;
+  seenEventKeys.add(key);
   const item = document.createElement('div');
   item.className = `event-item event-${classToken(event.type)}`;
   item.innerHTML = `
@@ -383,6 +388,7 @@ function appendEvent(raw, source) {
   `;
   liveEventsEl.prepend(item);
   while (liveEventsEl.children.length > 100) liveEventsEl.lastElementChild.remove();
+  while (seenEventKeys.size > 200) seenEventKeys.delete(seenEventKeys.values().next().value);
 }
 
 function setEventsConnection(message, variant = 'muted') {
@@ -706,6 +712,13 @@ async function createRun() {
     return;
   }
 
+  const dangerousPermission = optionalString(permissionModeEl) === 'bypassPermissions';
+  const allowDangerous = dangerousPermission && window.confirm('bypassPermissions 会跳过 SDK 权限检查。请确认当前仓库可信、可回滚，并且你接受本次高风险自动化。');
+  if (dangerousPermission && !allowDangerous) {
+    showToast('已取消 bypassPermissions 运行。', 'warning');
+    return;
+  }
+
   createButton.disabled = true;
   createButton.textContent = '启动中…';
   try {
@@ -719,6 +732,7 @@ async function createRun() {
         maxRounds: optionalNumber(maxRoundsEl),
         maxTurns: optionalNumber(maxTurnsEl),
         permissionMode: optionalString(permissionModeEl),
+        allowDangerous,
         models: {
           planner: optionalString(plannerModelEl),
           worker: optionalString(workerModelEl),

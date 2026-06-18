@@ -9,6 +9,7 @@ import { collectGitEvidence, gitPreflight } from './git-safety.js';
 import { allowedToolsForRole } from './policy.js';
 import { readEditablePrompts, renderPhasePrompt, systemPromptFile } from './prompts.js';
 import { clearControl, shouldStopAfterPhase } from './control.js';
+import { assertCurrentRun, clearRunLock, touchRunLock } from './run-lock.js';
 
 async function appendFile(path, content) {
   await mkdir(dirname(path), { recursive: true });
@@ -24,18 +25,19 @@ function dropStalePlannerPlaceholders(run) {
   run.phases = (run.phases || []).filter(phase => !stalePlannerPlaceholder(phase));
 }
 
-async function applyControlAfterPhase(cwd, run) {
+async function applyControlAfterPhase(cwd, run, publishEvent = event => appendEvent(cwd, event)) {
   const control = await shouldStopAfterPhase(cwd);
   if (!control) return false;
   run.status = control.action === 'cancel' ? 'cancelled' : 'paused';
   run.control = control;
   run.updatedAt = new Date().toISOString();
+  await assertCurrentRun(cwd, run.id);
   await writeRun(run, cwd);
-  await appendEvent(cwd, { type: 'control', action: control.action, status: run.status });
+  await publishEvent({ type: 'control', action: control.action, status: run.status, runId: run.id });
   return true;
 }
 
-async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPromptFile }) {
+async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPromptFile, publishEvent = event => appendEvent(cwd, event) }) {
   const startedAt = new Date().toISOString();
   const normalizedRound = round ?? 0;
   const phaseId = `${role}-${normalizedRound}`;
@@ -58,14 +60,17 @@ async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPro
   }
   run.status = 'running';
   run.updatedAt = startedAt;
+  await assertCurrentRun(cwd, run.id);
   await writeRun(run, cwd);
-  await appendEvent(cwd, { type: 'phase_start', phaseId, role, round: normalizedRound });
+  await touchRunLock(cwd, { runId: run.id, phaseId });
+  await publishEvent({ type: 'phase_start', phaseId, role, round: normalizedRound, runId: run.id });
 
   if (role === 'worker') {
     const beforeGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'before' });
     phase.gitBefore = await writeEvidence(cwd, `${phaseId}-git-before`, beforeGit);
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
-    await appendEvent(cwd, { type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'before', evidencePath: phase.gitBefore });
+    await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'before', evidencePath: phase.gitBefore, runId: run.id });
   }
 
   try {
@@ -74,34 +79,37 @@ async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPro
       role,
       prompt,
       systemPromptFile,
-      onEvent: event => appendEvent(cwd, { ...event, type: `agent_${event.type || 'event'}`, phaseId, role, round: normalizedRound })
+      onEvent: event => publishEvent({ ...event, type: `agent_${event.type || 'event'}`, phaseId, role, round: normalizedRound, runId: run.id })
     });
     if (role === 'worker') {
       const afterGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'after' });
       phase.gitAfter = await writeEvidence(cwd, `${phaseId}-git-after`, afterGit);
-      await appendEvent(cwd, { type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after', evidencePath: phase.gitAfter });
+      await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after', evidencePath: phase.gitAfter, runId: run.id });
     }
     phase.status = 'completed';
     phase.completedAt = new Date().toISOString();
     phase.sessionId = result.sessionId;
     phase.totalCostUsd = result.totalCostUsd;
     run.updatedAt = phase.completedAt;
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
-    await appendEvent(cwd, { type: 'phase_end', phaseId, role, round: normalizedRound, status: 'completed' });
+    await touchRunLock(cwd, { runId: run.id, phaseId });
+    await publishEvent({ type: 'phase_end', phaseId, role, round: normalizedRound, status: 'completed', runId: run.id });
     return result;
   } catch (error) {
     if (role === 'worker') {
       const afterGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'after-failed' });
       phase.gitAfter = await writeEvidence(cwd, `${phaseId}-git-after-failed`, afterGit);
-      await appendEvent(cwd, { type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after-failed', evidencePath: phase.gitAfter });
+      await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after-failed', evidencePath: phase.gitAfter, runId: run.id });
     }
     phase.status = 'failed';
     phase.completedAt = new Date().toISOString();
     phase.error = error instanceof Error ? error.message : String(error);
     run.status = 'failed';
     run.updatedAt = phase.completedAt;
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
-    await appendEvent(cwd, { type: 'phase_end', phaseId, role, round: normalizedRound, status: 'failed', error: phase.error });
+    await publishEvent({ type: 'phase_end', phaseId, role, round: normalizedRound, status: 'failed', error: phase.error, runId: run.id });
     throw error;
   }
 }
@@ -118,9 +126,13 @@ export async function verifyRunCompletion(cwd = process.cwd(), round = 0) {
 
   let passCountOk = false;
   if (existsSync(prdPath)) {
-    const prd = JSON.parse(await readFile(prdPath, 'utf8'));
-    const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
-    passCountOk = stories.length > 0 && stories.every(story => story?.passes === true);
+    try {
+      const prd = JSON.parse(await readFile(prdPath, 'utf8'));
+      const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
+      passCountOk = stories.length > 0 && stories.every(story => story?.passes === true);
+    } catch {
+      passCountOk = false;
+    }
   }
 
   const judge = existsSync(judgePath) ? await readFile(judgePath, 'utf8') : '';
@@ -148,8 +160,10 @@ export async function runAgentLoop({
   allowedTools,
   requireCleanGit = process.env.AGENT_LOOP_GIT_REQUIRE_CLEAN === 'true',
   plannerOnly = false,
-  sdk = {}
+  sdk = {},
+  publishEvent
 } = {}) {
+  const emit = publishEvent || (event => appendEvent(cwd, event));
   let run = await readRun(cwd);
   const startingNewRun = !run || prompt;
   if (startingNewRun) {
@@ -174,8 +188,9 @@ export async function runAgentLoop({
   const preflight = await gitPreflight({ cwd, requireClean: requireCleanGit });
   run.gitPreflight = preflight;
   await writeEvidence(cwd, 'git-preflight', preflight);
-  await appendEvent(cwd, {
+  await emit({
     type: 'git_preflight',
+    runId: run.id,
     blocked: preflight.blocked,
     dirty: preflight.dirty,
     isGitRepo: preflight.isGitRepo,
@@ -184,7 +199,9 @@ export async function runAgentLoop({
   if (preflight.blocked) {
     run.status = 'blocked';
     run.updatedAt = new Date().toISOString();
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
+    await clearRunLock(cwd, { runId: run.id });
     return run;
   }
   const editablePrompts = await readEditablePrompts(cwd);
@@ -208,21 +225,24 @@ export async function runAgentLoop({
       run,
       role: 'planner',
       prompt: renderPhasePrompt(editablePrompts.phasePrompts.planner, { prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'planner')
+      systemPromptFile: systemPromptFile(cwd, 'planner'),
+      publishEvent: emit
     });
   }
 
-  if (await applyControlAfterPhase(cwd, run)) return run;
+  if (await applyControlAfterPhase(cwd, run, emit)) return run;
 
   if (plannerOnly) {
     run.status = 'waiting-for-review';
     run.updatedAt = new Date().toISOString();
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
     return run;
   }
 
   for (let round = Math.max(1, run.currentRound || 1); round <= effectiveMaxRounds; round += 1) {
     run.currentRound = round;
+    await assertCurrentRun(cwd, run.id);
     await writeRun(run, cwd);
 
     await runAgentPhase({
@@ -232,9 +252,10 @@ export async function runAgentLoop({
       role: 'worker',
       round,
       prompt: renderPhasePrompt(editablePrompts.phasePrompts.worker, { round, prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'worker')
+      systemPromptFile: systemPromptFile(cwd, 'worker'),
+      publishEvent: emit
     });
-    if (await applyControlAfterPhase(cwd, run)) return run;
+    if (await applyControlAfterPhase(cwd, run, emit)) return run;
 
     await runAgentPhase({
       adapter: adapterFor('judge'),
@@ -243,25 +264,30 @@ export async function runAgentLoop({
       role: 'judge',
       round,
       prompt: renderPhasePrompt(editablePrompts.phasePrompts.judge, { round, prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'judge')
+      systemPromptFile: systemPromptFile(cwd, 'judge'),
+      publishEvent: emit
     });
     const judgeVerdict = await writeJudgeVerdictJson({ cwd, round });
-    await appendEvent(cwd, { type: 'judge_verdict', round, verdict: judgeVerdict.verdict, pass: judgeVerdict.pass });
-    if (await applyControlAfterPhase(cwd, run)) return run;
+    await emit({ type: 'judge_verdict', round, verdict: judgeVerdict.verdict, pass: judgeVerdict.pass, runId: run.id });
+    if (await applyControlAfterPhase(cwd, run, emit)) return run;
 
     const verification = await verifyRunCompletion(cwd, round);
     await appendFile(join(stateDir(cwd), 'logs', 'verification.log'), `${new Date().toISOString()} round=${round} ${JSON.stringify(verification)}\n`);
-    await appendEvent(cwd, { type: 'verification', round, verification });
+    await emit({ type: 'verification', round, verification, runId: run.id });
     if (verification.complete) {
       run.status = 'completed';
       run.updatedAt = new Date().toISOString();
+      await assertCurrentRun(cwd, run.id);
       await writeRun(run, cwd);
+      await clearRunLock(cwd, { runId: run.id });
       return run;
     }
   }
 
   run.status = 'max_rounds_reached';
   run.updatedAt = new Date().toISOString();
+  await assertCurrentRun(cwd, run.id);
   await writeRun(run, cwd);
+  await clearRunLock(cwd, { runId: run.id });
   return run;
 }

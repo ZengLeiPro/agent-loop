@@ -134,3 +134,79 @@ test('artifacts API exposes quality gate and evidence summaries', async () => {
     assert.equal(payload.artifacts.evidence.some(item => item.name === 'worker-1-git-after'), true);
   });
 });
+
+test('review API rejects invalid PRD JSON before writing checkpoint', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-invalid-prd-'));
+  await startRun({ cwd, prompt: 'invalid prd checkpoint', dryRun: true });
+
+  await withServer(cwd, async baseUrl => {
+    const response = await fetch(`${baseUrl}/api/review`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ files: { prd: '{not-json' } })
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /valid JSON/);
+  });
+});
+
+test('run API rejects a new run while an active run exists for the directory', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-active-run-'));
+  await startRun({ cwd, prompt: 'already active', dryRun: false });
+
+  await withServer(cwd, async baseUrl => {
+    const response = await fetch(`${baseUrl}/api/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'second run' })
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /already active/);
+  });
+});
+
+test('run API requires explicit dangerous unlock for bypassPermissions', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-bypass-'));
+
+  await withServer(cwd, async baseUrl => {
+    const blocked = await fetch(`${baseUrl}/api/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'dangerous run', permissionMode: 'bypassPermissions' })
+    });
+    assert.equal(blocked.status, 403);
+    assert.match((await blocked.json()).error, /bypassPermissions/);
+  });
+});
+
+test('artifacts API chooses latest judge by numeric round', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-judge-sort-'));
+  await startRun({ cwd, prompt: 'judge sort', dryRun: true });
+  const stateDir = join(cwd, '.agent-loop');
+  await writeFile(join(stateDir, 'judge-2.json'), '{"verdict":"FAIL"}\n', 'utf8');
+  await writeFile(join(stateDir, 'judge-10.json'), '{"verdict":"PASS"}\n', 'utf8');
+
+  await withServer(cwd, async baseUrl => {
+    const payload = await (await fetch(`${baseUrl}/api/artifacts`)).json();
+    assert.equal(payload.artifacts.qualityGate.verdict, 'PASS');
+  });
+});
+
+test('run API persists job metadata and exposes lock while queued', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-job-persist-'));
+
+  await withServer(cwd, async baseUrl => {
+    const created = await fetch(`${baseUrl}/api/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'persist dry run job' })
+    });
+    assert.equal(created.status, 201);
+    const payload = await created.json();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const jobJson = JSON.parse(await readFile(join(cwd, '.agent-loop', 'jobs', `${payload.job.id}.json`), 'utf8'));
+    assert.equal(jobJson.id, payload.job.id);
+    assert.equal(jobJson.runId, payload.run.id);
+    assert.equal(['completed', 'running', 'queued'].includes(jobJson.status), true);
+  });
+});

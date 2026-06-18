@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { parseAndValidatePrdJson } from './prd-schema.js';
 
 export const STATE_DIR = '.agent-loop';
 export const RUN_FILE = 'run.json';
@@ -143,7 +144,9 @@ export async function writeReviewFiles({ cwd = process.cwd(), files = {} } = {})
   await ensureStateDir(cwd);
   for (const key of Object.keys(REVIEW_FILES)) {
     if (Object.hasOwn(files, key)) {
-      await writeFile(reviewFilePath(cwd, key), String(files[key]), 'utf8');
+      const value = String(files[key]);
+      if (key === 'prd') parseAndValidatePrdJson(value);
+      await writeFile(reviewFilePath(cwd, key), value, 'utf8');
     }
   }
   return readReviewFiles(cwd);
