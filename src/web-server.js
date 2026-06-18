@@ -10,6 +10,8 @@ import { validateRunOptions, ValidationError } from './validation.js';
 import { EventHub } from './events.js';
 import { JobManager } from './job-manager.js';
 import { readControl, writeControl } from './control.js';
+import { assertPermissionModeAllowed } from './policy.js';
+import { clearRunLock, isActiveRun, readRunLock, writeRunLock } from './run-lock.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = resolve(__dirname, '../web');
@@ -134,7 +136,9 @@ async function readArtifacts(cwd) {
   const run = await readRun(cwd);
   const evidence = await listJsonArtifacts(join(dir, 'evidence'));
   const judgeArtifacts = await listJsonArtifacts(dir);
-  const judges = judgeArtifacts.filter(artifact => /^judge-\d+$/.test(artifact.name));
+  const judges = judgeArtifacts
+    .filter(artifact => /^judge-\d+$/.test(artifact.name))
+    .sort((a, b) => Number(a.name.slice('judge-'.length)) - Number(b.name.slice('judge-'.length)));
   const latestJudge = judges.at(-1)?.data || null;
   const verificationLog = await readFile(join(dir, 'logs', 'verification.log'), 'utf8').catch(() => '');
   const latestWorker = [...(run?.phases || [])].reverse().find(phase => phase.role === 'worker');
@@ -184,7 +188,7 @@ async function handleEvents(req, res, url, eventHub) {
 
 export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.env.AGENT_LOOP_API_TOKEN || randomBytes(24).toString('hex') } = {}) {
   const eventHub = new EventHub({ cwd });
-  const jobs = new JobManager({ eventHub });
+  const jobs = new JobManager({ cwd, eventHub });
 
   const server = createServer(async (req, res) => {
     try {
@@ -192,8 +196,9 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
       requireApiAccess(req, url, apiToken);
 
       if (url.pathname === '/api/status') {
+        await jobs.ready;
         const run = await readRun(cwd);
-        return json(res, 200, { cwd, stateDir: stateDir(cwd), run, jobs: jobs.all(), control: await readControl(cwd) });
+        return json(res, 200, { cwd, stateDir: stateDir(cwd), run, jobs: jobs.all(), lock: await readRunLock(cwd), control: await readControl(cwd) });
       }
       if (url.pathname === '/api/events' && req.method === 'GET') {
         return handleEvents(req, res, url, eventHub);
@@ -234,31 +239,52 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
         if (run.status !== 'waiting-for-review') {
           return json(res, 409, { error: 'Only runs waiting for review can be resumed.' });
         }
-        const job = jobs.create({
+        if (jobs.active().length > 0) return json(res, 409, { error: 'An agent-loop job is already active for this directory.' });
+        await writeRunLock(cwd, { runId: run.id, type: 'resume' });
+        const job = await jobs.create({
           type: 'resume',
           runId: run.id,
-          task: () => runAgentLoop({ cwd, plannerOnly: false })
+          task: async () => {
+            try {
+              return await runAgentLoop({ cwd, plannerOnly: false, publishEvent: event => eventHub.publish(event) });
+            } finally {
+              await clearRunLock(cwd, { runId: run.id });
+            }
+          }
         });
         return json(res, 202, { run, job });
       }
       if (url.pathname === '/api/run' && req.method === 'POST') {
         const body = await readJsonBody(req);
+        await jobs.ready;
+        const existingRun = await readRun(cwd);
+        if (isActiveRun(existingRun) || jobs.active().length > 0) return json(res, 409, { error: 'An agent-loop run is already active for this directory.' });
         const options = validateRunOptions(body, { cwd, defaultMaxRounds: DEFAULT_MAX_ROUNDS });
+        assertPermissionModeAllowed(options.permissionMode, { allowDangerous: body.allowDangerous === true });
         const run = await startRun({ ...options, dryRun: body.dryRun !== false });
-        const job = jobs.create({
+        await writeRunLock(cwd, { runId: run.id, type: body.dryRun !== false ? 'dry-run' : 'run' });
+        const job = await jobs.create({
           type: body.dryRun !== false ? 'dry-run' : 'run',
           runId: run.id,
-          task: () => (body.dryRun !== false
-            ? Promise.resolve(run)
-            : runAgentLoop({
-                cwd,
-                maxRounds: options.maxRounds,
-                maxTurns: options.maxTurns,
-                permissionMode: options.permissionMode,
-                plannerOnly: options.plannerOnly,
-                models: options.models,
-                sdk: options.sdk
-              }))
+          task: async () => {
+            try {
+              return body.dryRun !== false
+                ? run
+                : await runAgentLoop({
+                    cwd,
+                    maxRounds: options.maxRounds,
+                    maxTurns: options.maxTurns,
+                    permissionMode: options.permissionMode,
+                    plannerOnly: options.plannerOnly,
+                    models: options.models,
+                    sdk: options.sdk,
+                    publishEvent: event => eventHub.publish(event)
+                  });
+            } finally {
+              await clearRunLock(cwd, { runId: run.id });
+            }
+          },
+          metadata: { permissionMode: options.permissionMode, plannerOnly: options.plannerOnly }
         });
         return json(res, body.dryRun !== false ? 201 : 202, { run, job });
       }
@@ -270,7 +296,7 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
       res.end(data);
     } catch (error) {
       if (error?.code === 'ENOENT') return json(res, 404, { error: 'Not found' });
-      if (error instanceof HttpError || error instanceof ValidationError) {
+      if (error instanceof HttpError || error instanceof ValidationError || Number.isInteger(error?.statusCode)) {
         return json(res, error.statusCode || 400, { error: error.message });
       }
       return json(res, 500, { error: error instanceof Error ? error.message : String(error) });

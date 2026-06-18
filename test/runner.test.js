@@ -88,3 +88,20 @@ test('startRun does not create a permanent pending planner timeline placeholder 
   assert.equal(run.status, 'waiting-for-agent-adapter');
   assert.deepEqual(run.phases, []);
 });
+
+test('verifyRunCompletion treats invalid PRD JSON as an incomplete run instead of throwing', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-invalid-prd-completion-'));
+  const stateDir = join(cwd, '.agent-loop');
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(stateDir, 'progress.txt'), '<promise>COMPLETE</promise>\n', 'utf8');
+  await writeFile(join(stateDir, 'prd.json'), '{invalid', 'utf8');
+  await writeFile(join(stateDir, 'judge-1.md'), 'VERDICT: PASS\n', 'utf8');
+
+  assert.deepEqual(await verifyRunCompletion(cwd, 1), {
+    sentinelOk: true,
+    passCountOk: false,
+    judgeOk: true,
+    judgeSource: 'markdown',
+    complete: false
+  });
+});

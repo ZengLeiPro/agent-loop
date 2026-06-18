@@ -27,7 +27,14 @@ export async function readEvents(cwd = process.cwd(), { after, limit = MAX_BACKL
   const file = eventsFile(cwd);
   if (!existsSync(file)) return [];
   const lines = (await readFile(file, 'utf8')).trim().split(/\r?\n/).filter(Boolean);
-  const parsed = lines.map(line => JSON.parse(line));
+  const parsed = [];
+  for (const line of lines) {
+    try {
+      parsed.push(JSON.parse(line));
+    } catch {
+      parsed.push({ id: `evt_corrupt_${parsed.length}`, type: 'event_log_corrupt', createdAt: new Date().toISOString(), message: 'Skipped a corrupt events.ndjson line.' });
+    }
+  }
   const afterIndex = after ? parsed.findIndex(event => event.id === after) : -1;
   const filtered = after ? parsed.slice(afterIndex === -1 ? parsed.length : afterIndex + 1) : parsed;
   return filtered.slice(-limit);
