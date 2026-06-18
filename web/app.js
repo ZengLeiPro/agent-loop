@@ -2,6 +2,8 @@ const statusEl = document.querySelector('#status');
 const statusSummaryEl = document.querySelector('#statusSummary');
 const phaseTimelineEl = document.querySelector('#phaseTimeline');
 const promptEl = document.querySelector('#prompt');
+const autopilotLevelEl = document.querySelector('#autopilotLevel');
+const autopilotMappingEl = document.querySelector('#autopilotMapping');
 const dryRunEl = document.querySelector('#dryRun');
 const plannerOnlyEl = document.querySelector('#plannerOnly');
 const maxRoundsEl = document.querySelector('#maxRounds');
@@ -21,8 +23,21 @@ const savePromptsButton = document.querySelector('#savePrompts');
 const loadReviewButton = document.querySelector('#loadReview');
 const saveReviewButton = document.querySelector('#saveReview');
 const resumeRunButton = document.querySelector('#resumeRun');
+const pauseRunButton = document.querySelector('#pauseRun');
+const controlResumeRunButton = document.querySelector('#controlResumeRun');
+const cancelRunButton = document.querySelector('#cancelRun');
+const retryJudgeButton = document.querySelector('#retryJudge');
+const clearEventsButton = document.querySelector('#clearEvents');
+const refreshArtifactsButton = document.querySelector('#refreshArtifacts');
 const reviewSpecEl = document.querySelector('#reviewSpec');
 const reviewPrdEl = document.querySelector('#reviewPrd');
+const prdSummaryEl = document.querySelector('#prdSummary');
+const prdStoriesEl = document.querySelector('#prdStories');
+const liveEventsEl = document.querySelector('#liveEvents');
+const eventsConnectionEl = document.querySelector('#eventsConnection');
+const qualityGateEl = document.querySelector('#qualityGate');
+const changesEvidenceEl = document.querySelector('#changesEvidence');
+const toastRegionEl = document.querySelector('#toastRegion');
 
 const AUTO_REFRESH_STATUSES = new Set(['waiting-for-agent-adapter', 'running']);
 const SAFE_CLASS_TOKEN = /^[a-z0-9_-]+$/i;
@@ -31,15 +46,58 @@ const STATUS_LABELS = {
   planned: '已规划',
   'waiting-for-agent-adapter': '等待 Agent',
   running: '运行中',
+  paused: '已暂停',
+  cancelled: '已取消',
+  canceled: '已取消',
   'waiting-for-review': '等待人工检查',
   completed: '已完成',
   failed: '失败',
   max_rounds_reached: '达到最大轮数'
 };
 const ROLE_LABELS = { planner: 'Planner', worker: 'Worker', judge: 'Judge' };
+const AUTOPILOT_LEVELS = {
+  preview: {
+    label: 'Level 0 · Preview',
+    dryRun: true,
+    plannerOnly: false,
+    permissionMode: 'acceptEdits',
+    description: '只写入本地状态，适合确认任务配置，不调用 SDK。'
+  },
+  review: {
+    label: 'Level 1 · Review',
+    dryRun: false,
+    plannerOnly: true,
+    permissionMode: 'plan',
+    description: '执行 Planner 后停在人工审查点，优先安全规划。'
+  },
+  guarded: {
+    label: 'Level 2 · Guarded',
+    dryRun: false,
+    plannerOnly: false,
+    permissionMode: 'acceptEdits',
+    description: '默认自动化：运行完整循环并自动接受文件编辑。'
+  },
+  auto: {
+    label: 'Level 3 · Auto',
+    dryRun: false,
+    plannerOnly: false,
+    permissionMode: 'auto',
+    description: '交给模型/SDK 权限分类器判断，适合中等信任场景。'
+  },
+  yolo: {
+    label: 'Level 4 · YOLO',
+    dryRun: false,
+    plannerOnly: false,
+    permissionMode: 'bypassPermissions',
+    description: '跳过权限检查，仅限可信本地仓库和可回滚环境。'
+  }
+};
 
 let refreshTimer;
+let eventSource;
+let eventPollingTimer;
 let lastStatusData;
+let syntheticEventKey = '';
 
 const promptFields = {
   systemPrompts: {
@@ -130,6 +188,19 @@ function setAutoRefresh(run) {
   }
 }
 
+function showToast(message, variant = 'success') {
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${classToken(variant)}`;
+  toast.setAttribute('role', variant === 'error' ? 'alert' : 'status');
+  toast.innerHTML = `<strong>${escapeHtml(message)}</strong>`;
+  toastRegionEl.append(toast);
+  setTimeout(() => toast.classList.add('toast-visible'), 20);
+  setTimeout(() => {
+    toast.classList.remove('toast-visible');
+    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+  }, 4200);
+}
+
 function renderEmptyStatus(data) {
   statusSummaryEl.innerHTML = `
     <div class="empty-state">
@@ -205,19 +276,32 @@ function renderTimeline(run) {
   `;
 }
 
+function updateRunControls(run) {
+  const hasRun = Boolean(run);
+  const isActive = AUTO_REFRESH_STATUSES.has(run?.status);
+  pauseRunButton.disabled = !hasRun || !isActive;
+  cancelRunButton.disabled = !hasRun || ['completed', 'failed', 'cancelled', 'canceled'].includes(run?.status);
+  controlResumeRunButton.disabled = !hasRun || !['paused', 'waiting-for-review'].includes(run?.status);
+  retryJudgeButton.disabled = !hasRun;
+  resumeRunButton.disabled = run?.status !== 'waiting-for-review';
+}
+
 function renderStatus(data) {
   lastStatusData = data;
   statusEl.textContent = JSON.stringify(data, null, 2);
   renderSummary(data);
   renderTimeline(data.run);
-  resumeRunButton.disabled = data.run?.status !== 'waiting-for-review';
+  updateRunControls(data.run);
   setAutoRefresh(data.run);
+  renderSyntheticEvents(data.run);
+  refreshArtifacts({ silent: true }).catch(() => {});
 }
 
 function renderError(error) {
   const message = error instanceof Error ? error.message : String(error);
   statusSummaryEl.innerHTML = `<div class="error-card"><strong>请求失败</strong><p>${escapeHtml(message)}</p></div>`;
   statusEl.textContent = message;
+  showToast(message, 'error');
 }
 
 async function readJson(response) {
@@ -232,9 +316,260 @@ async function readJson(response) {
   return data;
 }
 
+async function readOptionalJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (response.status === 404 || response.status === 405) return { unavailable: true, status: response.status };
+  return { data: await readJson(response) };
+}
+
 async function refresh() {
   const response = await fetch('/api/status');
   renderStatus(await readJson(response));
+}
+
+function applyAutopilotLevel(level) {
+  const config = AUTOPILOT_LEVELS[level];
+  if (!config) return renderAutopilotMapping();
+  dryRunEl.checked = config.dryRun;
+  plannerOnlyEl.checked = config.plannerOnly;
+  permissionModeEl.value = config.permissionMode;
+  renderAutopilotMapping();
+}
+
+function maybeMarkCustomAutopilot() {
+  const match = Object.entries(AUTOPILOT_LEVELS).find(([, config]) => (
+    config.dryRun === dryRunEl.checked
+    && config.plannerOnly === plannerOnlyEl.checked
+    && config.permissionMode === permissionModeEl.value
+  ));
+  autopilotLevelEl.value = match?.[0] || 'custom';
+  renderAutopilotMapping();
+}
+
+function renderAutopilotMapping() {
+  const level = autopilotLevelEl.value;
+  const config = AUTOPILOT_LEVELS[level];
+  const label = config?.label || 'Custom';
+  const description = config?.description || '正在使用手动覆盖参数；提交时仍按当前 dryRun / plannerOnly / permissionMode 字段发送。';
+  autopilotMappingEl.innerHTML = `
+    <strong>${escapeHtml(label)}</strong>
+    <span>${escapeHtml(description)}</span>
+    <code>dryRun=${dryRunEl.checked}</code>
+    <code>plannerOnly=${plannerOnlyEl.checked}</code>
+    <code>permissionMode=${escapeHtml(permissionModeEl.value || '—')}</code>
+  `;
+}
+
+function normalizeEvent(raw, source = 'event') {
+  const event = typeof raw === 'object' && raw !== null ? raw : { message: raw };
+  return {
+    type: event.type || event.event || event.phase || source,
+    message: event.message || event.note || event.text || event.status || JSON.stringify(event),
+    timestamp: event.timestamp || event.createdAt || event.time || new Date().toISOString(),
+    role: event.role,
+    round: event.round
+  };
+}
+
+function appendEvent(raw, source) {
+  const event = normalizeEvent(raw, source);
+  const item = document.createElement('div');
+  item.className = `event-item event-${classToken(event.type)}`;
+  item.innerHTML = `
+    <time>${escapeHtml(formatDate(event.timestamp))}</time>
+    <strong>${escapeHtml(event.type)}</strong>
+    ${event.role || event.round ? `<span>${escapeHtml([event.role, event.round ? `Round ${event.round}` : ''].filter(Boolean).join(' · '))}</span>` : ''}
+    <p>${escapeHtml(event.message)}</p>
+  `;
+  liveEventsEl.prepend(item);
+  while (liveEventsEl.children.length > 100) liveEventsEl.lastElementChild.remove();
+}
+
+function setEventsConnection(message, variant = 'muted') {
+  eventsConnectionEl.textContent = message;
+  eventsConnectionEl.dataset.variant = variant;
+}
+
+function renderSyntheticEvents(run) {
+  const phases = run?.phases || [];
+  const key = JSON.stringify(phases.map(phase => [phase.role, phase.round, phase.status, phase.startedAt, phase.completedAt, phase.error]));
+  if (!phases.length || key === syntheticEventKey) return;
+  syntheticEventKey = key;
+  const latest = phases.at(-1);
+  appendEvent({
+    type: 'status-poll',
+    role: latest.role,
+    round: latest.round,
+    status: statusLabel(latest.status),
+    message: `${phaseLabel(latest)}：${statusLabel(latest.status)}`,
+    timestamp: latest.completedAt || latest.startedAt || run.updatedAt
+  }, 'poll');
+}
+
+async function pollEvents() {
+  const result = await readOptionalJson('/api/events', { headers: { accept: 'application/json' } });
+  if (result.unavailable) {
+    setEventsConnection('/api/events 尚未实现，正在从 /api/status 轮询生成摘要事件。', 'warning');
+    await refresh();
+    return;
+  }
+  setEventsConnection('正在通过 /api/events 轮询事件。', 'ok');
+  const events = Array.isArray(result.data) ? result.data : result.data.events || result.data.items || [];
+  for (const event of events.slice(-20)) appendEvent(event, 'poll');
+}
+
+function startEventStream() {
+  clearInterval(eventPollingTimer);
+  if (eventSource) eventSource.close();
+  if ('EventSource' in window) {
+    eventSource = new EventSource('/api/events');
+    eventSource.onopen = () => setEventsConnection('SSE 已连接：/api/events', 'ok');
+    eventSource.onmessage = event => {
+      try {
+        appendEvent(JSON.parse(event.data), 'sse');
+      } catch {
+        appendEvent(event.data, 'sse');
+      }
+    };
+    eventSource.onerror = () => {
+      eventSource.close();
+      setEventsConnection('SSE 不可用，切换到 fallback polling。', 'warning');
+      eventPollingTimer = setInterval(() => pollEvents().catch(() => {}), 5000);
+      pollEvents().catch(() => {});
+    };
+    return;
+  }
+  setEventsConnection('当前浏览器不支持 SSE，使用 fallback polling。', 'warning');
+  eventPollingTimer = setInterval(() => pollEvents().catch(() => {}), 5000);
+  pollEvents().catch(() => {});
+}
+
+function collectStories(prd) {
+  if (Array.isArray(prd)) return prd;
+  if (!prd || typeof prd !== 'object') return [];
+  const candidates = [prd.stories, prd.userStories, prd.requirements, prd.items, prd.features, prd.tasks];
+  return candidates.find(Array.isArray) || [];
+}
+
+function storyValue(story, keys, fallback = '—') {
+  if (typeof story === 'string') return keys.includes('title') ? story : fallback;
+  for (const key of keys) {
+    if (story?.[key] !== undefined && story[key] !== null && story[key] !== '') return story[key];
+  }
+  return fallback;
+}
+
+function renderPrdOverview() {
+  const raw = reviewPrdEl.value.trim();
+  if (!raw) {
+    prdSummaryEl.innerHTML = '<div class="empty-state">PRD 为空，加载或填写 prd.json 后会在这里生成 summary。</div>';
+    prdStoriesEl.innerHTML = '';
+    return;
+  }
+  try {
+    const prd = JSON.parse(raw);
+    const stories = collectStories(prd);
+    const title = prd.title || prd.name || prd.product || 'PRD';
+    const statuses = stories.reduce((acc, story) => {
+      const status = String(storyValue(story, ['status', 'state', 'phase'], 'unknown'));
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    prdSummaryEl.innerHTML = `
+      <div class="summary-grid compact-summary">
+        <div><span>标题</span><strong>${escapeHtml(title)}</strong></div>
+        <div><span>Stories</span><strong>${stories.length}</strong></div>
+        <div><span>状态分布</span><strong>${escapeHtml(Object.entries(statuses).map(([key, value]) => `${key}: ${value}`).join(' · ') || '—')}</strong></div>
+      </div>
+    `;
+    if (!stories.length) {
+      prdStoriesEl.innerHTML = '<div class="empty-state">未识别到 stories/userStories/requirements/items/features/tasks 数组。</div>';
+      return;
+    }
+    prdStoriesEl.innerHTML = `
+      <div class="table-wrap"><table class="stories-table">
+        <thead><tr><th>ID</th><th>Story</th><th>Priority</th><th>Status</th><th>Acceptance / Evidence</th></tr></thead>
+        <tbody>${stories.map((story, index) => `
+          <tr>
+            <td>${escapeHtml(storyValue(story, ['id', 'key'], index + 1))}</td>
+            <td>${escapeHtml(storyValue(story, ['title', 'story', 'name', 'description']))}</td>
+            <td>${escapeHtml(storyValue(story, ['priority', 'severity']))}</td>
+            <td><span class="status-badge status-${classToken(storyValue(story, ['status', 'state', 'phase'], 'unknown'))}">${escapeHtml(storyValue(story, ['status', 'state', 'phase'], 'unknown'))}</span></td>
+            <td>${escapeHtml(storyValue(story, ['acceptanceCriteria', 'acceptance', 'evidence', 'notes']))}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table></div>
+    `;
+  } catch (error) {
+    prdSummaryEl.innerHTML = `<div class="error-card"><strong>PRD JSON 解析失败</strong><p>${escapeHtml(error.message)}</p></div>`;
+    prdStoriesEl.innerHTML = '';
+  }
+}
+
+function normalizeArtifactPayload(data) {
+  return data?.artifacts || data?.evidence || data || {};
+}
+
+function renderQualityGate(payload) {
+  const artifacts = normalizeArtifactPayload(payload);
+  const gate = artifacts.qualityGate || artifacts.quality || artifacts.gate || artifacts.judge || {};
+  const verdict = gate.verdict || gate.status || gate.result || artifacts.verdict || 'unknown';
+  const checks = gate.checks || artifacts.checks || artifacts.tests || [];
+  qualityGateEl.innerHTML = `
+    <div class="quality-verdict quality-${classToken(verdict)}">
+      <span>Verdict</span><strong>${escapeHtml(verdict)}</strong>
+    </div>
+    <div class="check-list">
+      ${(Array.isArray(checks) ? checks : Object.entries(checks).map(([name, value]) => ({ name, status: value }))).slice(0, 8).map(check => `
+        <div class="check-item"><strong>${escapeHtml(check.name || check.label || check.command || 'check')}</strong><span>${escapeHtml(check.status || check.result || check.outcome || check)}</span></div>
+      `).join('') || '<div class="empty-state">暂无 Quality Gate check 数据。</div>'}
+    </div>
+  `;
+}
+
+function renderChangesEvidence(payload) {
+  const artifacts = normalizeArtifactPayload(payload);
+  const changes = artifacts.changes || artifacts.files || artifacts.diff || [];
+  const evidence = artifacts.evidence || artifacts.links || artifacts.reports || artifacts.logs || [];
+  const list = value => Array.isArray(value) ? value : Object.entries(value || {}).map(([name, detail]) => ({ name, detail }));
+  changesEvidenceEl.innerHTML = `
+    <div class="evidence-columns">
+      <div><h4>Changes</h4>${renderEvidenceList(list(changes), '暂无 changes 数据。')}</div>
+      <div><h4>Evidence</h4>${renderEvidenceList(list(evidence), '暂无 evidence 数据。')}</div>
+    </div>
+  `;
+}
+
+function renderEvidenceList(items, emptyText) {
+  if (!items.length) return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+  return `<ul class="evidence-list">${items.slice(0, 12).map(item => `<li><strong>${escapeHtml(item.path || item.file || item.name || item.title || item.type || 'item')}</strong><span>${escapeHtml(item.detail || item.summary || item.status || item.url || item.message || item)}</span></li>`).join('')}</ul>`;
+}
+
+async function refreshArtifacts({ silent = false } = {}) {
+  if (!silent) {
+    refreshArtifactsButton.disabled = true;
+    refreshArtifactsButton.textContent = '刷新中…';
+  }
+  try {
+    let result = await readOptionalJson('/api/artifacts');
+    if (result.unavailable) result = await readOptionalJson('/api/evidence');
+    if (result.unavailable) {
+      qualityGateEl.innerHTML = '<div class="empty-state">后端尚未提供 /api/artifacts 或 /api/evidence；区域已就绪，接口补齐后会自动消费。</div>';
+      changesEvidenceEl.innerHTML = '';
+      if (!silent) showToast('证据接口尚未实现。', 'warning');
+      return;
+    }
+    renderQualityGate(result.data);
+    renderChangesEvidence(result.data);
+    if (!silent) showToast('证据已刷新。');
+  } catch (error) {
+    if (!silent) renderError(error);
+  } finally {
+    if (!silent) {
+      refreshArtifactsButton.disabled = false;
+      refreshArtifactsButton.textContent = '刷新证据';
+    }
+  }
 }
 
 async function loadPrompts() {
@@ -265,6 +600,7 @@ async function loadReview() {
     const data = await readJson(response);
     reviewSpecEl.value = data.files?.spec || '';
     reviewPrdEl.value = data.files?.prd || '';
+    renderPrdOverview();
   } catch (error) {
     renderError(error);
   } finally {
@@ -283,8 +619,7 @@ async function saveReview() {
       body: JSON.stringify({ files: { spec: reviewSpecEl.value, prd: reviewPrdEl.value } })
     });
     await readJson(response);
-    statusSummaryEl.querySelector('.success-card')?.remove();
-    statusSummaryEl.insertAdjacentHTML('afterbegin', '<div class="success-card">Planner 产物已保存，可以继续运行。</div>');
+    showToast('Planner 产物已保存，可以继续运行。');
   } catch (error) {
     renderError(error);
     throw error;
@@ -306,7 +641,35 @@ async function resumeRun() {
     renderError(error);
   } finally {
     resumeRunButton.textContent = '继续运行';
-    resumeRunButton.disabled = lastStatusData?.run?.status !== 'waiting-for-review';
+    updateRunControls(lastStatusData?.run);
+  }
+}
+
+async function callRunControl(action, endpoint, button, controlAction) {
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = '请求中…';
+  try {
+    let result = await readOptionalJson(endpoint, { method: 'POST' });
+    if (result.unavailable && controlAction) {
+      result = await readOptionalJson('/api/control', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: controlAction, reason: 'Requested from Web UI run controls.' })
+      });
+    }
+    if (result.unavailable) {
+      showToast(`${action} API 尚未实现，后端补齐后此按钮会直接可用。`, 'warning');
+      return;
+    }
+    if (result.data?.run) renderStatus({ cwd: lastStatusData?.cwd || '', stateDir: lastStatusData?.stateDir || '', run: result.data.run });
+    else await refresh();
+    showToast(`${action} 请求已发送。`);
+  } catch (error) {
+    renderError(error);
+  } finally {
+    button.textContent = originalText;
+    updateRunControls(lastStatusData?.run);
   }
 }
 
@@ -326,8 +689,7 @@ async function savePrompts() {
       body: JSON.stringify(payload)
     });
     await readJson(response);
-    statusSummaryEl.querySelector('.success-card')?.remove();
-    statusSummaryEl.insertAdjacentHTML('afterbegin', '<div class="success-card">提示语已保存，后续运行会立即使用。</div>');
+    showToast('提示语已保存，后续运行会立即使用。');
   } catch (error) {
     renderError(error);
   } finally {
@@ -372,6 +734,7 @@ async function createRun() {
     });
     const data = await readJson(response);
     renderStatus({ cwd: lastStatusData?.cwd || '', stateDir: lastStatusData?.stateDir || '', run: data.run });
+    showToast('运行已启动。');
   } catch (error) {
     renderError(error);
   } finally {
@@ -380,12 +743,24 @@ async function createRun() {
   }
 }
 
+autopilotLevelEl.addEventListener('change', () => applyAutopilotLevel(autopilotLevelEl.value));
+for (const input of [dryRunEl, plannerOnlyEl, permissionModeEl]) input.addEventListener('change', maybeMarkCustomAutopilot);
 refreshButton.addEventListener('click', () => refresh().catch(renderError));
 loadReviewButton.addEventListener('click', loadReview);
 saveReviewButton.addEventListener('click', saveReview);
 resumeRunButton.addEventListener('click', resumeRun);
+pauseRunButton.addEventListener('click', () => callRunControl('Pause', '/api/pause', pauseRunButton, 'pause-after-current-phase'));
+controlResumeRunButton.addEventListener('click', () => callRunControl('Resume', '/api/resume', controlResumeRunButton));
+cancelRunButton.addEventListener('click', () => callRunControl('Cancel', '/api/cancel', cancelRunButton, 'cancel'));
+retryJudgeButton.addEventListener('click', () => callRunControl('Retry Judge', '/api/retry-judge', retryJudgeButton));
+clearEventsButton.addEventListener('click', () => { liveEventsEl.innerHTML = ''; syntheticEventKey = ''; });
+refreshArtifactsButton.addEventListener('click', () => refreshArtifacts().catch(renderError));
+reviewPrdEl.addEventListener('input', renderPrdOverview);
 createButton.addEventListener('click', createRun);
 loadPromptsButton.addEventListener('click', loadPrompts);
 savePromptsButton.addEventListener('click', savePrompts);
 
-Promise.all([refresh(), loadReview(), loadPrompts()]).catch(renderError);
+applyAutopilotLevel(autopilotLevelEl.value);
+renderPrdOverview();
+startEventStream();
+Promise.all([refresh(), loadReview(), loadPrompts(), refreshArtifacts({ silent: true })]).catch(renderError);

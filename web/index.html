@@ -34,16 +34,36 @@
         <label class="field-label" for="prompt">任务描述</label>
         <textarea id="prompt" required placeholder="例如：重构登录页，补充测试，并提交 PR"></textarea>
 
-        <div class="quick-options">
-          <label class="switch-card">
-            <input id="dryRun" type="checkbox" checked />
-            <span><strong>Dry run 预览</strong><small>只创建状态文件，不调用 SDK</small></span>
-          </label>
-          <label class="switch-card">
-            <input id="plannerOnly" type="checkbox" />
-            <span><strong>Planner 后暂停</strong><small>适合先审阅 spec / PRD</small></span>
-          </label>
+        <div class="autopilot-panel" aria-labelledby="autopilot-title">
+          <div>
+            <h3 id="autopilot-title">Autopilot 等级</h3>
+            <p class="hint">选择一个可解释的自动化档位，底层仍写入现有 <code>dryRun</code>、<code>plannerOnly</code> 与 <code>permissionMode</code>。</p>
+          </div>
+          <label class="field-label" for="autopilotLevel">运行策略</label>
+          <select id="autopilotLevel">
+            <option value="preview" selected>Level 0 · Preview：Dry run 只预览</option>
+            <option value="review">Level 1 · Review：Planner 后人工审查</option>
+            <option value="guarded">Level 2 · Guarded：自动接受编辑</option>
+            <option value="auto">Level 3 · Auto：由模型/SDK 判断权限</option>
+            <option value="yolo">Level 4 · YOLO：跳过权限检查</option>
+            <option value="custom">Custom：手动微调下方参数</option>
+          </select>
+          <div id="autopilotMapping" class="mapping-card" aria-live="polite"></div>
         </div>
+
+        <details class="config-panel">
+          <summary>手动覆盖 Autopilot 映射</summary>
+          <div class="quick-options">
+            <label class="switch-card">
+              <input id="dryRun" type="checkbox" />
+              <span><strong>Dry run 预览</strong><small>只创建状态文件，不调用 SDK</small></span>
+            </label>
+            <label class="switch-card">
+              <input id="plannerOnly" type="checkbox" />
+              <span><strong>Planner 后暂停</strong><small>适合先审阅 spec / PRD</small></span>
+            </label>
+          </div>
+        </details>
 
         <details class="config-panel" open>
           <summary>基础执行参数</summary>
@@ -97,6 +117,35 @@
         </div>
         <div id="statusSummary" class="status-summary" role="status" aria-live="polite">加载中…</div>
         <div id="phaseTimeline" class="phase-timeline"></div>
+        <section class="run-controls" aria-labelledby="run-controls-title">
+          <div class="panel-mini-header">
+            <div><h3 id="run-controls-title">Run controls</h3><p class="hint">按钮会调用对应后端 API；当前版本若接口尚未实现，会以 toast 温和提示。</p></div>
+          </div>
+          <div class="control-grid">
+            <button id="pauseRun" class="button button-secondary" type="button">Pause</button>
+            <button id="controlResumeRun" class="button button-secondary" type="button">Resume</button>
+            <button id="cancelRun" class="button button-danger" type="button">Cancel</button>
+            <button id="retryJudge" class="button button-secondary" type="button">Retry Judge</button>
+          </div>
+        </section>
+
+        <section class="events-card" aria-labelledby="events-title">
+          <div class="panel-mini-header">
+            <div><h3 id="events-title">Live events</h3><p id="eventsConnection" class="hint">正在连接 SSE /api/events…</p></div>
+            <button id="clearEvents" class="button button-ghost" type="button">清空</button>
+          </div>
+          <div id="liveEvents" class="event-stream" role="log" aria-live="polite"></div>
+        </section>
+
+        <section class="evidence-card" aria-labelledby="quality-title">
+          <div class="panel-mini-header">
+            <div><h3 id="quality-title">Quality Gate</h3><p class="hint">优先消费 <code>/api/artifacts</code>，不可用时尝试 <code>/api/evidence</code>。</p></div>
+            <button id="refreshArtifacts" class="button button-secondary" type="button">刷新证据</button>
+          </div>
+          <div id="qualityGate" class="quality-gate"></div>
+          <div id="changesEvidence" class="changes-evidence"></div>
+        </section>
+
         <details class="raw-status"><summary>调试：查看原始 JSON</summary><pre id="status">加载中…</pre></details>
       </section>
     </section>
@@ -106,7 +155,14 @@
         <div><div class="section-kicker">03 · Human checkpoint</div><h2 id="review-title">Planner 产物审查</h2><p class="hint">Planner 后暂停时，在这里审阅并修改 <code>.agent-loop/spec.md</code> 与 <code>.agent-loop/prd.json</code>，保存后点击继续运行。</p></div>
         <div class="actions"><button id="loadReview" class="button button-secondary" type="button">加载 spec / PRD</button><button id="saveReview" class="button button-secondary" type="button">保存修改</button><button id="resumeRun" class="button button-primary" type="button">继续运行</button></div>
       </div>
-      <div class="prompt-grid two-col">
+      <div class="prd-overview" aria-labelledby="prd-overview-title">
+        <div class="panel-mini-header">
+          <div><h3 id="prd-overview-title">PRD stories summary</h3><p class="hint">从下方 raw <code>prd.json</code> 编辑器实时解析；JSON 无法解析时会保留编辑器并显示提示。</p></div>
+        </div>
+        <div id="prdSummary" class="prd-summary"></div>
+        <div id="prdStories" class="prd-stories"></div>
+      </div>
+      <div class="prompt-grid two-col raw-editors">
         <label>spec.md<textarea id="reviewSpec" class="review-editor" spellcheck="false"></textarea></label>
         <label>prd.json<textarea id="reviewPrd" class="review-editor" spellcheck="false"></textarea></label>
       </div>
@@ -125,6 +181,7 @@
       <details class="advanced-prompts"><summary>高级：阶段任务模板</summary><p class="hint">可使用占位符：<code>{{prompt}}</code> 表示用户任务，<code>{{round}}</code> 表示当前轮次。</p><div class="prompt-grid three-col"><label>Planner 任务提示语<textarea id="plannerPhasePrompt" class="prompt-editor"></textarea></label><label>Worker 任务提示语<textarea id="workerPhasePrompt" class="prompt-editor"></textarea></label><label>Judge 任务提示语<textarea id="judgePhasePrompt" class="prompt-editor"></textarea></label></div></details>
     </section>
   </main>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

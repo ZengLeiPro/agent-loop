@@ -1,18 +1,19 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MAX_ROUNDS, readReviewFiles, readRun, startRun, stateDir, writeReviewFiles } from './core.js';
 import { runAgentLoop } from './runner.js';
 import { readEditablePrompts, writeEditablePrompts } from './prompts.js';
+import { validateRunOptions, ValidationError } from './validation.js';
+import { EventHub } from './events.js';
+import { JobManager } from './job-manager.js';
+import { readControl, writeControl } from './control.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = resolve(__dirname, '../web');
-
-const DEFAULT_MAX_TURNS = 50;
-const DEFAULT_PERMISSION_MODE = 'acceptEdits';
-const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions']);
-const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -21,76 +22,193 @@ const contentTypes = {
   '.json': 'application/json; charset=utf-8'
 };
 
+class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'HttpError';
+    this.statusCode = statusCode;
+  }
+}
+
 function json(res, status, payload) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload, null, 2));
 }
 
-async function readBody(req) {
+async function readBody(req, { limit = DEFAULT_BODY_LIMIT_BYTES } = {}) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  try {
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > limit) throw new HttpError(413, `Request body exceeds ${limit} bytes.`);
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, 'Unable to read request body.');
+  }
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function positiveInteger(value, fallback, name) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer.`);
-  return number;
-}
-
-function cleanModels(models = {}) {
-  return Object.fromEntries(
-    ['planner', 'worker', 'judge']
-      .map(role => [role, optionalStringValue(models[role])])
-      .filter(([, model]) => model)
-  );
-}
-
-function optionalStringValue(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function optionalPositiveInteger(value, name) {
-  if (value === undefined || value === null || value === '') return undefined;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer.`);
-  return number;
-}
-
-function optionalPermissionMode(value) {
-  const permissionMode = optionalStringValue(value) || DEFAULT_PERMISSION_MODE;
-  if (!PERMISSION_MODES.has(permissionMode)) {
-    throw new Error('permissionMode must be one of: default, acceptEdits, plan, dontAsk, auto, bypassPermissions.');
+async function readJsonBody(req) {
+  const raw = await readBody(req);
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, 'Request body must be valid JSON.');
   }
-  return permissionMode;
 }
 
-function optionalEffort(value) {
-  const effort = optionalStringValue(value);
-  if (!effort) return undefined;
-  if (!EFFORT_LEVELS.has(effort)) throw new Error('effort must be one of: low, medium, high, xhigh, max.');
-  return effort;
+function isLoopback(remoteAddress = '') {
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress) || remoteAddress.startsWith('::ffff:127.');
 }
 
-function cleanSdkOptions(sdk = {}) {
-  return Object.fromEntries(
-    Object.entries({
-      apiEndpoint: optionalStringValue(sdk.apiEndpoint),
-      apiKey: optionalStringValue(sdk.apiKey),
-      effort: optionalEffort(sdk.effort),
-      maxThinkingTokens: optionalPositiveInteger(sdk.maxThinkingTokens, 'maxThinkingTokens')
-    }).filter(([, value]) => value !== undefined)
-  );
+function safeEqual(a, b) {
+  const left = Buffer.from(a || '');
+  const right = Buffer.from(b || '');
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
-  return createServer(async (req, res) => {
+function requestToken(req, url) {
+  const authorization = req.headers.authorization || '';
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  return match?.[1] || req.headers['x-agent-loop-token'] || url.searchParams.get('token') || '';
+}
+
+function requireApiAccess(req, url, apiToken) {
+  if (!url.pathname.startsWith('/api/')) return;
+  if (isLoopback(req.socket.remoteAddress)) return;
+  if (safeEqual(String(requestToken(req, url)), apiToken)) return;
+  throw new HttpError(401, 'API token required for non-loopback requests.');
+}
+
+function resolveStaticPath(pathname) {
+  const normalizedPathname = pathname === '/' ? '/index.html' : pathname;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(normalizedPathname);
+  } catch {
+    throw new HttpError(400, 'Invalid URL path.');
+  }
+  if (decoded.includes('\0')) throw new HttpError(400, 'Invalid URL path.');
+  const filePath = resolve(webRoot, `.${decoded}`);
+  const fromRoot = relative(webRoot, filePath);
+  if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) throw new HttpError(403, 'Forbidden');
+  return filePath;
+}
+
+function sendSse(res, event) {
+  res.write(`id: ${event.id}\n`);
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+async function readJsonArtifact(path) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function listJsonArtifacts(dir) {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(error => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const files = entries.filter(entry => entry.isFile() && entry.name.endsWith('.json'));
+  const artifacts = await Promise.all(files.map(async entry => {
+    const path = join(dir, entry.name);
+    return {
+      name: basename(entry.name, '.json'),
+      path,
+      data: await readJsonArtifact(path)
+    };
+  }));
+  return artifacts.filter(artifact => artifact.data !== null);
+}
+
+async function readArtifacts(cwd) {
+  const dir = stateDir(cwd);
+  const run = await readRun(cwd);
+  const evidence = await listJsonArtifacts(join(dir, 'evidence'));
+  const judgeArtifacts = await listJsonArtifacts(dir);
+  const judges = judgeArtifacts.filter(artifact => /^judge-\d+$/.test(artifact.name));
+  const latestJudge = judges.at(-1)?.data || null;
+  const verificationLog = await readFile(join(dir, 'logs', 'verification.log'), 'utf8').catch(() => '');
+  const latestWorker = [...(run?.phases || [])].reverse().find(phase => phase.role === 'worker');
+  const gitAfter = evidence.find(artifact => artifact.path === latestWorker?.gitAfter)?.data
+    || evidence.find(artifact => artifact.name === `${latestWorker?.id}-git-after`)?.data
+    || null;
+  return {
+    artifacts: {
+      qualityGate: {
+        verdict: latestJudge?.verdict || 'unknown',
+        checks: [
+          { name: 'Latest Judge', status: latestJudge?.verdict || 'missing' },
+          { name: 'Run status', status: run?.status || 'none' },
+          { name: 'Verification log', status: verificationLog ? 'available' : 'missing' }
+        ]
+      },
+      changes: gitAfter?.changedFiles || [],
+      evidence: evidence.map(artifact => ({
+        name: artifact.name,
+        path: artifact.path,
+        status: artifact.data?.blocked ? 'blocked' : artifact.data?.verdict || artifact.data?.moment || 'captured',
+        detail: artifact.data?.diffStat || artifact.data?.message || artifact.data?.capturedAt || artifact.data?.checkedAt
+      })),
+      judge: latestJudge,
+      verificationLog: verificationLog.split(/\r?\n/).filter(Boolean).slice(-20)
+    }
+  };
+}
+
+async function handleEvents(req, res, url, eventHub) {
+  const wantsStream = req.headers.accept?.includes('text/event-stream') || url.searchParams.get('stream') === '1';
+  const after = url.searchParams.get('after') || undefined;
+  const limit = Number(url.searchParams.get('limit') || '500');
+  const events = await eventHub.backlog({ after, limit: Number.isInteger(limit) && limit > 0 ? limit : 500 });
+  if (!wantsStream) return json(res, 200, { events });
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive'
+  });
+  for (const event of events) sendSse(res, event);
+  const unsubscribe = eventHub.subscribe(event => sendSse(res, event));
+  req.on('close', unsubscribe);
+  res.write(': connected\n\n');
+}
+
+export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.env.AGENT_LOOP_API_TOKEN || randomBytes(24).toString('hex') } = {}) {
+  const eventHub = new EventHub({ cwd });
+  const jobs = new JobManager({ eventHub });
+
+  const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://localhost');
+      requireApiAccess(req, url, apiToken);
+
       if (url.pathname === '/api/status') {
         const run = await readRun(cwd);
-        return json(res, 200, { cwd, stateDir: stateDir(cwd), run });
+        return json(res, 200, { cwd, stateDir: stateDir(cwd), run, jobs: jobs.all(), control: await readControl(cwd) });
+      }
+      if (url.pathname === '/api/events' && req.method === 'GET') {
+        return handleEvents(req, res, url, eventHub);
+      }
+      if ((url.pathname === '/api/artifacts' || url.pathname === '/api/evidence') && req.method === 'GET') {
+        return json(res, 200, await readArtifacts(cwd));
+      }
+      if (url.pathname === '/api/control' && req.method === 'GET') {
+        return json(res, 200, { control: await readControl(cwd) });
+      }
+      if (url.pathname === '/api/control' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const control = await writeControl(cwd, { action: body.action, reason: body.reason });
+        await eventHub.publish({ type: 'control.requested', control });
+        return json(res, 202, { control });
       }
       if (url.pathname === '/api/prompts' && req.method === 'GET') {
         return json(res, 200, await readEditablePrompts(cwd));
@@ -99,11 +217,11 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
         return json(res, 200, { files: await readReviewFiles(cwd) });
       }
       if (url.pathname === '/api/review' && req.method === 'PUT') {
-        const body = JSON.parse(await readBody(req) || '{}');
+        const body = await readJsonBody(req);
         return json(res, 200, { files: await writeReviewFiles({ cwd, files: body.files }) });
       }
       if (url.pathname === '/api/prompts' && req.method === 'PUT') {
-        const body = JSON.parse(await readBody(req) || '{}');
+        const body = await readJsonBody(req);
         return json(res, 200, await writeEditablePrompts({
           cwd,
           systemPrompts: body.systemPrompts,
@@ -116,48 +234,54 @@ export function createAgentLoopServer({ cwd = process.cwd() } = {}) {
         if (run.status !== 'waiting-for-review') {
           return json(res, 409, { error: 'Only runs waiting for review can be resumed.' });
         }
-        const resumed = await runAgentLoop({ cwd, plannerOnly: false });
-        return json(res, 200, { run: resumed });
+        const job = jobs.create({
+          type: 'resume',
+          runId: run.id,
+          task: () => runAgentLoop({ cwd, plannerOnly: false })
+        });
+        return json(res, 202, { run, job });
       }
       if (url.pathname === '/api/run' && req.method === 'POST') {
-        const body = JSON.parse(await readBody(req) || '{}');
-        const options = {
-          prompt: body.prompt,
-          cwd,
-          maxRounds: positiveInteger(body.maxRounds, DEFAULT_MAX_ROUNDS, 'maxRounds'),
-          maxTurns: positiveInteger(body.maxTurns, DEFAULT_MAX_TURNS, 'maxTurns'),
-          permissionMode: optionalPermissionMode(body.permissionMode),
-          plannerOnly: Boolean(body.plannerOnly),
-          models: cleanModels(body.models),
-          sdk: cleanSdkOptions(body.sdk)
-        };
-        const run = body.dryRun !== false
-          ? await startRun({ ...options, dryRun: true })
-          : await runAgentLoop({
-              ...options,
-              maxTurns: options.maxTurns,
-              permissionMode: options.permissionMode,
-              plannerOnly: options.plannerOnly,
-              models: options.models,
-              sdk: options.sdk
-            });
-        return json(res, 201, { run });
+        const body = await readJsonBody(req);
+        const options = validateRunOptions(body, { cwd, defaultMaxRounds: DEFAULT_MAX_ROUNDS });
+        const run = await startRun({ ...options, dryRun: body.dryRun !== false });
+        const job = jobs.create({
+          type: body.dryRun !== false ? 'dry-run' : 'run',
+          runId: run.id,
+          task: () => (body.dryRun !== false
+            ? Promise.resolve(run)
+            : runAgentLoop({
+                cwd,
+                maxRounds: options.maxRounds,
+                maxTurns: options.maxTurns,
+                permissionMode: options.permissionMode,
+                plannerOnly: options.plannerOnly,
+                models: options.models,
+                sdk: options.sdk
+              }))
+        });
+        return json(res, body.dryRun !== false ? 201 : 202, { run, job });
       }
-      const safePath = url.pathname === '/' ? '/index.html' : url.pathname;
-      const filePath = join(webRoot, safePath.replace(/^\/+/, ''));
-      if (!filePath.startsWith(webRoot)) return json(res, 403, { error: 'Forbidden' });
+      if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Not found' });
+
+      const filePath = resolveStaticPath(url.pathname);
       const data = await readFile(filePath);
       res.writeHead(200, { 'content-type': contentTypes[extname(filePath)] || 'application/octet-stream' });
       res.end(data);
     } catch (error) {
       if (error?.code === 'ENOENT') return json(res, 404, { error: 'Not found' });
+      if (error instanceof HttpError || error instanceof ValidationError) {
+        return json(res, error.statusCode || 400, { error: error.message });
+      }
       return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
     }
   });
+  server.agentLoopApiToken = apiToken;
+  return server;
 }
 
-export async function serve({ cwd = process.cwd(), port = 4317, host = '127.0.0.1' } = {}) {
-  const server = createAgentLoopServer({ cwd });
+export async function serve({ cwd = process.cwd(), port = 4317, host = '127.0.0.1', apiToken } = {}) {
+  const server = createAgentLoopServer({ cwd, apiToken });
   await new Promise(resolveListen => server.listen(port, host, resolveListen));
-  return { server, url: `http://${host}:${port}` };
+  return { server, url: `http://${host}:${port}`, apiToken: server.agentLoopApiToken };
 }

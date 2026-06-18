@@ -27,6 +27,7 @@ test('verifyRunCompletion accepts sentinel only on the final progress line', asy
     sentinelOk: true,
     passCountOk: true,
     judgeOk: true,
+    judgeSource: 'markdown',
     complete: true
   });
 });
@@ -42,6 +43,7 @@ test('verifyRunCompletion rejects historical sentinel that is not the final prog
     sentinelOk: false,
     passCountOk: true,
     judgeOk: true,
+    judgeSource: 'markdown',
     complete: false
   });
 });
@@ -57,7 +59,25 @@ test('verifyRunCompletion requires non-empty PRD stories and Judge PASS', async 
     sentinelOk: true,
     passCountOk: false,
     judgeOk: false,
+    judgeSource: 'markdown',
     complete: false
+  });
+});
+
+test('verifyRunCompletion prefers structured judge verdict JSON over markdown', async () => {
+  const cwd = await createCompletionFixture({
+    progress: '<promise>COMPLETE</promise>\n',
+    prd: { userStories: [{ id: 's1', passes: true }] },
+    judge: 'VERDICT: FAIL\n'
+  });
+  await writeFile(join(cwd, '.agent-loop', 'judge-1.json'), `${JSON.stringify({ verdict: 'PASS' }, null, 2)}\n`, 'utf8');
+
+  assert.deepEqual(await verifyRunCompletion(cwd, 1), {
+    sentinelOk: true,
+    passCountOk: true,
+    judgeOk: true,
+    judgeSource: 'json',
+    complete: true
   });
 });
 
