@@ -12,12 +12,17 @@
       <div>
         <p class="eyebrow">Agent orchestration console</p>
         <h1>Agent Loop 控制台</h1>
-        <p class="lede">任务配置、启动运行、实时观察 Planner → Worker → Judge 循环。</p>
+        <p class="lede">以独立页面组织 Launch、Monitor、Events、Quality、Review 与 Prompts，避免在单个长页面里上下滚动。</p>
       </div>
-      <div class="topbar-actions">
+      <nav class="topbar-actions page-nav" aria-label="主导航">
+        <a class="button button-ghost" data-nav-page="launch" href="/launch">Launch</a>
+        <a class="button button-ghost" data-nav-page="monitor" href="/monitor">Monitor</a>
+        <a class="button button-ghost" data-nav-page="events" href="/events">Events</a>
+        <a class="button button-ghost" data-nav-page="quality" href="/quality">Quality</a>
+        <a class="button button-ghost" data-nav-page="review" href="/review">Review</a>
+        <a class="button button-ghost" data-nav-page="prompts" href="/prompts">Prompts</a>
         <button id="refresh" class="button button-secondary" type="button">刷新状态</button>
-        <a class="button button-ghost" href="#review">审查 spec/PRD</a><a class="button button-ghost" href="#prompts">编辑提示语</a>
-      </div>
+      </nav>
     </header>
 
     <section class="notice" aria-label="运行说明">
@@ -25,8 +30,8 @@
       <span>dry run 只写入本地状态；真实运行会调用 <code>@anthropic-ai/claude-agent-sdk</code>，请先配置依赖与凭据。</span>
     </section>
 
-    <section class="workspace" aria-label="Agent loop workspace">
-      <aside class="launch-card" aria-labelledby="launch-title">
+    <div class="page-stack" aria-live="polite">
+      <section id="launch" class="launch-card page-view" data-page="launch" aria-labelledby="launch-title">
         <div class="section-kicker">01 · Launch</div>
         <h2 id="launch-title">创建或调整运行</h2>
         <p class="hint">像 CI/CD runbook 一样先填写目标，再按需展开高级执行参数。</p>
@@ -105,9 +110,9 @@
         </details>
 
         <button id="create" class="button button-primary full-width" type="button">启动运行</button>
-      </aside>
+      </section>
 
-      <section class="monitor-card" aria-labelledby="monitor-title">
+      <section id="monitor" class="monitor-card page-view" data-page="monitor" aria-labelledby="monitor-title">
         <div class="monitor-heading">
           <div>
             <div class="section-kicker">02 · Monitor</div>
@@ -129,28 +134,31 @@
           </div>
         </section>
 
-        <section class="events-card" aria-labelledby="events-title">
+      </section>
+
+      <section id="events" class="events-card page-view" data-page="events" aria-labelledby="events-title">
           <div class="panel-mini-header">
             <div><h3 id="events-title">Live events</h3><p id="eventsConnection" class="hint">正在连接 SSE /api/events…</p></div>
             <button id="clearEvents" class="button button-ghost" type="button">清空</button>
           </div>
           <div id="liveEvents" class="event-stream" role="log" aria-live="polite"></div>
-        </section>
+      </section>
 
-        <section class="evidence-card" aria-labelledby="quality-title">
+      <section id="quality" class="evidence-card page-view" data-page="quality" aria-labelledby="quality-title">
           <div class="panel-mini-header">
             <div><h3 id="quality-title">Quality Gate</h3><p class="hint">优先消费 <code>/api/artifacts</code>，不可用时尝试 <code>/api/evidence</code>。</p></div>
             <button id="refreshArtifacts" class="button button-secondary" type="button">刷新证据</button>
           </div>
           <div id="qualityGate" class="quality-gate"></div>
           <div id="changesEvidence" class="changes-evidence"></div>
-        </section>
-
-        <details class="raw-status"><summary>调试：查看原始 JSON</summary><pre id="status">加载中…</pre></details>
       </section>
-    </section>
 
-    <section id="review" class="review-card" aria-labelledby="review-title">
+      <section id="debug" class="raw-status page-view" data-page="debug" aria-labelledby="debug-title">
+        <h2 id="debug-title">调试：查看原始 JSON</h2>
+        <pre id="status">加载中…</pre>
+      </section>
+
+      <section id="review" class="review-card page-view" data-page="review" aria-labelledby="review-title">
       <div class="panel-header">
         <div><div class="section-kicker">03 · Human checkpoint</div><h2 id="review-title">Planner 产物审查</h2><p class="hint">Planner 后暂停时，在这里审阅并修改 <code>.agent-loop/spec.md</code> 与 <code>.agent-loop/prd.json</code>，保存后点击继续运行。</p></div>
         <div class="actions"><button id="loadReview" class="button button-secondary" type="button">加载 spec / PRD</button><button id="saveReview" class="button button-secondary" type="button">保存修改</button><button id="resumeRun" class="button button-primary" type="button">继续运行</button></div>
@@ -166,9 +174,9 @@
         <label>spec.md<textarea id="reviewSpec" class="review-editor" spellcheck="false"></textarea></label>
         <label>prd.json<textarea id="reviewPrd" class="review-editor" spellcheck="false"></textarea></label>
       </div>
-    </section>
+      </section>
 
-    <section id="prompts" class="prompts-card" aria-labelledby="prompts-title">
+      <section id="prompts" class="prompts-card page-view" data-page="prompts" aria-labelledby="prompts-title">
       <div class="panel-header">
         <div><div class="section-kicker">04 · Prompt library</div><h2 id="prompts-title">提示语编辑</h2><p class="hint">保存后写入当前仓库的 <code>.agent-loop/prompts/</code>，后续运行立即生效。</p></div>
         <div class="actions"><button id="loadPrompts" class="button button-secondary" type="button">重新加载提示语</button><button id="savePrompts" class="button button-primary" type="button">保存提示语</button></div>
@@ -179,7 +187,8 @@
         <label>Judge 系统提示语<textarea id="judgeSystemPrompt" class="prompt-editor"></textarea></label>
       </div>
       <details class="advanced-prompts"><summary>高级：阶段任务模板</summary><p class="hint">可使用占位符：<code>{{prompt}}</code> 表示用户任务，<code>{{round}}</code> 表示当前轮次。</p><div class="prompt-grid three-col"><label>Planner 任务提示语<textarea id="plannerPhasePrompt" class="prompt-editor"></textarea></label><label>Worker 任务提示语<textarea id="workerPhasePrompt" class="prompt-editor"></textarea></label><label>Judge 任务提示语<textarea id="judgePhasePrompt" class="prompt-editor"></textarea></label></div></details>
-    </section>
+      </section>
+    </div>
   </main>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
   <script src="/app.js" type="module"></script>

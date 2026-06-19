@@ -49,6 +49,19 @@ test('resume API rejects runs that are not waiting for review', async () => {
   });
 });
 
+test('static file server serves app shell for top-level UI pages', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-pages-'));
+
+  await withServer(cwd, async baseUrl => {
+    for (const page of ['/', '/launch', '/monitor', '/events', '/quality', '/debug', '/review', '/prompts']) {
+      const response = await fetch(`${baseUrl}${page}`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('content-type'), /text\/html/);
+      assert.match(await response.text(), /data-page="monitor"/);
+    }
+  });
+});
+
 test('static file server rejects path traversal attempts', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-web-static-'));
 

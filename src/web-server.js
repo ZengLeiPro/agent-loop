@@ -86,8 +86,10 @@ function requireApiAccess(req, url, apiToken) {
   throw new HttpError(401, 'API token required for non-loopback requests.');
 }
 
+const appPagePaths = new Set(['/', '/launch', '/monitor', '/events', '/quality', '/debug', '/review', '/prompts']);
+
 function resolveStaticPath(pathname) {
-  const normalizedPathname = pathname === '/' ? '/index.html' : pathname;
+  const normalizedPathname = appPagePaths.has(pathname) ? '/index.html' : pathname;
   let decoded;
   try {
     decoded = decodeURIComponent(normalizedPathname);
