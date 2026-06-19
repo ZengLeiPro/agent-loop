@@ -39,6 +39,54 @@ const qualityGateEl = document.querySelector('#qualityGate');
 const changesEvidenceEl = document.querySelector('#changesEvidence');
 const toastRegionEl = document.querySelector('#toastRegion');
 
+const pageViews = [...document.querySelectorAll('[data-page]')];
+const pageNavLinks = [...document.querySelectorAll('[data-nav-page]')];
+const PAGE_TITLES = {
+  launch: 'Launch',
+  monitor: 'Monitor',
+  events: 'Events',
+  quality: 'Quality',
+  debug: 'Debug',
+  review: 'Review',
+  prompts: 'Prompts'
+};
+const DEFAULT_PAGE = 'launch';
+
+function pageFromPath(pathname = window.location.pathname) {
+  const page = pathname.replace(/^\//, '') || DEFAULT_PAGE;
+  return pageViews.some(view => view.dataset.page === page) ? page : DEFAULT_PAGE;
+}
+
+function showPage(page, { replace = false } = {}) {
+  const nextPage = pageViews.some(view => view.dataset.page === page) ? page : DEFAULT_PAGE;
+  for (const view of pageViews) {
+    const active = view.dataset.page === nextPage;
+    view.classList.toggle('is-active', active);
+    view.toggleAttribute('hidden', !active);
+  }
+  for (const link of pageNavLinks) {
+    const active = link.dataset.navPage === nextPage;
+    link.classList.toggle('is-active', active);
+    link.setAttribute('aria-current', active ? 'page' : 'false');
+  }
+  document.title = `${PAGE_TITLES[nextPage]} · agent-loop 控制台`;
+  const nextPath = nextPage === DEFAULT_PAGE ? '/' : `/${nextPage}`;
+  if (window.location.pathname !== nextPath) {
+    window.history[replace ? 'replaceState' : 'pushState']({ page: nextPage }, '', nextPath);
+  }
+}
+
+function setupPageNavigation() {
+  for (const link of pageNavLinks) {
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      showPage(link.dataset.navPage);
+    });
+  }
+  window.addEventListener('popstate', () => showPage(pageFromPath(), { replace: true }));
+  showPage(pageFromPath(), { replace: true });
+}
+
 const AUTO_REFRESH_STATUSES = new Set(['waiting-for-agent-adapter', 'running']);
 const SAFE_CLASS_TOKEN = /^[a-z0-9_-]+$/i;
 const STATUS_LABELS = {
@@ -643,6 +691,7 @@ async function resumeRun() {
     const response = await fetch('/api/resume', { method: 'POST' });
     const data = await readJson(response);
     renderStatus({ cwd: lastStatusData?.cwd || '', stateDir: lastStatusData?.stateDir || '', run: data.run });
+    showPage('monitor');
   } catch (error) {
     renderError(error);
   } finally {
@@ -748,7 +797,8 @@ async function createRun() {
     });
     const data = await readJson(response);
     renderStatus({ cwd: lastStatusData?.cwd || '', stateDir: lastStatusData?.stateDir || '', run: data.run });
-    showToast('运行已启动。');
+    showPage('monitor');
+    showToast('运行已启动，已切换到 Monitor 页面。');
   } catch (error) {
     renderError(error);
   } finally {
@@ -774,6 +824,7 @@ createButton.addEventListener('click', createRun);
 loadPromptsButton.addEventListener('click', loadPrompts);
 savePromptsButton.addEventListener('click', savePrompts);
 
+setupPageNavigation();
 applyAutopilotLevel(autopilotLevelEl.value);
 renderPrdOverview();
 startEventStream();
