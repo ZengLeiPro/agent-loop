@@ -1,14 +1,27 @@
 # agent-loop
 
-`agent-loop` 是一个独立、本地优先的 Agent Loop 项目，后续计划拆分为独立的 GitHub 仓库。它将一个简单的 CLI 与轻量级 Web UI 打包在一起，不依赖父级应用。
+`agent-loop` 是一个独立、本地优先的 **DAG 驱动 Agent 编排** 项目，后续计划拆分为独立的 GitHub 仓库。它将一个简单的 CLI 与轻量级 Web UI 打包在一起，不依赖父级应用。
 
 ## 目标
 
 - 将项目完整地自包含在当前目录中。
 - 支持从 macOS 上的 Git checkout 本地运行。
-- 提供通用的 Planner → Worker → Judge 循环基础能力。
-- 将目标仓库的项目本地状态写入 `.agent-loop/`。
-- 内置一个小型 Web UI，方便不想完全通过 CLI 操作的用户使用。
+- **通用 DAG 编排引擎**：节点（agent / loop / tool / gather）+ 依赖边，schema-validated；ralph-compound（Planner → Worker → Judge 循环）只是其中一个内置模板。
+- 将目标仓库的项目本地状态写入 `.agent-loop/`（包含 `nodes/<id>/<iter>.json` 每节点产出 + `cache/` 节点缓存 + `templates/` 用户模板）。
+- 内置 Web UI：DAG 监控（节点列表 + 状态色 + 详情）、可拖拽 DAG 编辑器（纯 SVG，零第三方依赖）。
+
+## DAG 编排核心概念
+
+| 概念 | 说明 |
+|------|------|
+| **模板**（template） | 一个 JSON 文件描述完整 DAG，schemaVersion=1。内置：`ralph-compound` / `parallel-review` / `map-reduce-refactor` / `meta-planner`。用户模板放 `.agent-loop/templates/<name>.json` 会覆盖同名内置模板。 |
+| **节点类型** | `agent`（调 Claude SDK）/ `loop`（带 until 表达式的子图循环）/ `tool`（注册的 JS 工具，零 LLM）/ `gather`（聚合上游产出）。 |
+| **agentType** | `reader`（只读 + 写工件）/ `writer`（含 Bash，唯一能改工程代码的角色，**同层 writer 必须串联**）/ `judge`（与 reader 工具集相同，语义为审计）。 |
+| **模板字符串** | `{{input.prompt}}` / `{{nodes.<id>.text}}` / `{{nodes.<id>.json.userStories[0].id}}` / `{{loop.<var>}}`。极简成员/索引访问，不接 JS。 |
+| **until 表达式** | loop 节点退出条件，例：`nodes.judge.json.verdict == 'PASS' && nodes.verify.json.complete == true`。支持 `==/!=/<=/>=/<>/&&/!/||/()`。 |
+| **retries** | 节点级 `{ max, backoffMs }`，失败自动指数退避重试。 |
+| **cache** | `{ enabled: true }` 时，(节点契约 + 上游产出) 命中时跳过执行。 |
+| **plannerOnly** | 启动时只跑顶层 `planner` 节点，停在 `waiting-for-review` 等人工审核 spec/PRD 后 resume。 |
 
 ## 当前状态
 
@@ -42,9 +55,22 @@ npm install
 node ./bin/agent-loop.js --help
 node ./bin/agent-loop.js init
 node ./bin/agent-loop.js init --cwd /path/to/target-repo
+
+# 经典 ralph-compound 模板（默认）
 node ./bin/agent-loop.js run "Add a small feature" --dry-run
 node ./bin/agent-loop.js run "Add a small feature" --planner-only
 node ./bin/agent-loop.js resume
+
+# 选别的内置模板
+node ./bin/agent-loop.js templates
+node ./bin/agent-loop.js run "Review this diff" --template parallel-review
+node ./bin/agent-loop.js run "Refactor auth module" --template map-reduce-refactor
+
+# 让 meta-planner 自动产出自定义 DAG，再用它跑
+node ./bin/agent-loop.js plan "Use 5 parallel researchers to scope X, then implement"
+node ./bin/agent-loop.js run "<your prompt>" --template dynamic
+
+# 模型 / 权限 / 验证 / Web UI
 node ./bin/agent-loop.js run "Add a small feature" --planner-model claude-opus-4-1 --worker-model claude-sonnet-4-5 --judge-model claude-opus-4-1 --permission-mode acceptEdits
 node ./bin/agent-loop.js verify
 node ./bin/agent-loop.js status
@@ -70,11 +96,12 @@ npm start
 
 ```text
 .agent-loop/
-  run.json
+  run.json                              # schemaVersion=2, nodes[] + 兼容 phases[]
   spec.md
   prd.json
   progress.txt
   judge-<round>.md
+  judge-<round>.json
   logs/
     verification.log
   diffs/
@@ -82,9 +109,15 @@ npm start
   evidence/
     git-preflight.json
     worker-<round>-git-after.json
-  events.ndjson
+  events.ndjson                         # 事件流，含 node_start / node_end / node_retry / node_cache_hit
   control.json
-  judge-<round>.json
+  nodes/                                # 每节点每轮产出
+    <recordId>/
+      <iteration>.json                  # { text, json, sessionId, totalCostUsd, ... }
+  cache/                                # 命中型节点缓存
+    <hash>.json
+  templates/                            # 用户自定义 DAG 模板，覆盖同名内置模板
+    <name>.json
   prompts/
     planner.md
     worker.md
