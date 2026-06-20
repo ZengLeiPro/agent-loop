@@ -195,6 +195,21 @@ function validateNode(node, path, knownTools) {
       fail(`${path}.position`, 'must be { x: number, y: number } when present (UI-only hint).');
     }
   }
+  if (node.retries !== undefined) {
+    if (!isPlainObject(node.retries)) fail(`${path}.retries`, 'must be an object when present.');
+    if (node.retries.max !== undefined && (!Number.isInteger(node.retries.max) || node.retries.max < 0)) {
+      fail(`${path}.retries.max`, 'must be a non-negative integer when present.');
+    }
+    if (node.retries.backoffMs !== undefined && (!Number.isInteger(node.retries.backoffMs) || node.retries.backoffMs < 0)) {
+      fail(`${path}.retries.backoffMs`, 'must be a non-negative integer (milliseconds) when present.');
+    }
+  }
+  if (node.cache !== undefined) {
+    if (!isPlainObject(node.cache)) fail(`${path}.cache`, 'must be an object when present.');
+    if (node.cache.enabled !== undefined && typeof node.cache.enabled !== 'boolean') {
+      fail(`${path}.cache.enabled`, 'must be a boolean when present.');
+    }
+  }
 
   if (type === 'agent') validateAgentNode(node, path);
   if (type === 'loop') validateLoopNode(node, path, knownTools);

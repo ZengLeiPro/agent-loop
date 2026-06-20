@@ -1,0 +1,16 @@
+{
+  "$schemaVersion": 1,
+  "name": "meta-planner",
+  "description": "Single-agent template that writes .agent-loop/templates/dynamic.json from a user prompt. After this run, invoke `agent-loop run --template dynamic ...` to execute the produced DAG.",
+  "concurrency": 1,
+  "nodes": [
+    {
+      "id": "meta-planner",
+      "type": "agent",
+      "agentType": "writer",
+      "model": "planner",
+      "promptRef": "meta-planner/planner.md",
+      "user": "Translate the following user request into a complete DAG template file at `.agent-loop/templates/dynamic.json`. Keep it minimal and runnable.\n\nUser request: {{input.prompt}}"
+    }
+  ]
+}

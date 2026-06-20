@@ -13,6 +13,7 @@ function printHelp() {
     'Usage:',
     '  agent-loop init [--cwd PATH] [--force]',
     '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--template NAME] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]',
+    '  agent-loop plan <prompt> [--cwd PATH]                  # use meta-planner agent to produce a custom DAG',
     '  agent-loop resume [--cwd PATH]',
     '  agent-loop status [--cwd PATH]',
     '  agent-loop templates [--cwd PATH]',
@@ -92,6 +93,15 @@ export async function main(args) {
     const run = await runAgentLoop(options);
     console.log('agent-loop run finished or paused.');
     console.log(summarizeRun(run));
+    return;
+  }
+  if (command === 'plan') {
+    const prompt = stripFlags(rest, new Set(['--cwd']), new Set()).join(' ');
+    if (!prompt.trim()) throw new Error('plan requires a non-empty prompt.');
+    console.log('Running meta-planner template to produce .agent-loop/templates/dynamic.json ...');
+    await runAgentLoop({ cwd, prompt: prompt.trim(), template: 'meta-planner', maxRounds: 1, plannerOnly: false });
+    console.log('Done. Next step:');
+    console.log(`  agent-loop run "<your prompt>" --template dynamic --cwd ${cwd}`);
     return;
   }
   if (command === 'templates') {

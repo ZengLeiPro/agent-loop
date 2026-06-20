@@ -14,6 +14,7 @@ import { executeAgentNode } from './nodes/agent.js';
 import { executeToolNode } from './nodes/tool.js';
 import { executeGatherNode } from './nodes/gather.js';
 import { executeLoopNode } from './nodes/loop.js';
+import { buildCacheKey, readCacheEntry, writeCacheEntry } from './cache.js';
 
 class Semaphore {
   constructor(max) {
@@ -105,6 +106,10 @@ export class DagExecutor {
     const consumesConcurrency = node.type === 'agent' || node.type === 'tool';
     if (consumesConcurrency) await this.semaphore.acquire();
     const recordId = nodeRecordId(node, iteration, parentLoopId);
+    const retryConfig = node.retries || {};
+    const maxRetries = Number.isInteger(retryConfig.max) ? retryConfig.max : 0;
+    const backoffBase = Number.isInteger(retryConfig.backoffMs) ? retryConfig.backoffMs : 1000;
+    let attempt = 0;
     const legacy = ralphLegacyFor(node.id, iteration, parentLoopId);
     const startedAt = new Date().toISOString();
     await this.#upsertNodeRecord({
@@ -119,7 +124,39 @@ export class DagExecutor {
     });
     await this.#emit({ type: 'node_start', runId: this.run.id, nodeId: recordId, nodeRef: node.id, nodeType: node.type, iteration, parentLoopId });
 
+    // Retry loop. On failure within budget: backoff + retry without re-cache-lookup.
+    // Final failure: record failed + rethrow. Outer try/finally ensures semaphore release.
     try {
+    // eslint-disable-next-line no-unmodified-loop-condition
+    while (true) {
+    try {
+      // Cache lookup (agent / tool / gather only — loop output is just iteration stats).
+      let upstreamSnapshot = {};
+      if (node.cache?.enabled && node.type !== 'loop') {
+        for (const inputId of node.inputs || []) {
+          const upstream = runtime.getNode(inputId);
+          if (upstream) upstreamSnapshot[inputId] = upstream;
+        }
+        const cacheKey = buildCacheKey(node, upstreamSnapshot);
+        const cached = await readCacheEntry(this.cwd, cacheKey);
+        if (cached?.value) {
+          await this.#emit({ type: 'node_cache_hit', runId: this.run.id, nodeId: recordId, nodeRef: node.id, cacheKey });
+          const output = cached.value;
+          const outputPath = await writeNodeOutput(this.cwd, recordId, iteration, output);
+          runtime.recordNode(node.id, output);
+          runtime.recordNode(recordId, output);
+          await this.#upsertNodeRecord({
+            id: recordId,
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            cacheHit: true,
+            outputPath
+          });
+          await this.#emit({ type: 'node_end', runId: this.run.id, nodeId: recordId, nodeRef: node.id, status: 'completed', iteration, cacheHit: true });
+          return output;
+        }
+      }
+
       let output;
       if (node.type === 'agent') {
         output = await executeAgentNode({
@@ -163,6 +200,12 @@ export class DagExecutor {
       runtime.recordNode(node.id, output);
       runtime.recordNode(recordId, output);
 
+      // Cache write (after success).
+      if (node.cache?.enabled && node.type !== 'loop') {
+        const cacheKey = buildCacheKey(node, upstreamSnapshot);
+        await writeCacheEntry(this.cwd, cacheKey, output);
+      }
+
       const completedAt = new Date().toISOString();
       await this.#upsertNodeRecord({
         id: recordId,
@@ -174,18 +217,28 @@ export class DagExecutor {
         gitBefore: output.gitBefore,
         gitAfter: output.gitAfter
       });
-      await this.#emit({ type: 'node_end', runId: this.run.id, nodeId: recordId, nodeRef: node.id, status: 'completed', iteration });
+      await this.#emit({ type: 'node_end', runId: this.run.id, nodeId: recordId, nodeRef: node.id, status: 'completed', iteration, attempt });
       return output;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (attempt < maxRetries) {
+        attempt += 1;
+        const backoff = backoffBase * Math.pow(2, attempt - 1);
+        await this.#emit({ type: 'node_retry', runId: this.run.id, nodeId: recordId, nodeRef: node.id, attempt, maxRetries, backoffMs: backoff, error: message });
+        await new Promise(resolve => setTimeout(resolve, backoff));
+        continue;
+      }
       await this.#upsertNodeRecord({
         id: recordId,
         status: 'failed',
         completedAt: new Date().toISOString(),
-        error: message
+        error: message,
+        attempts: attempt + 1
       });
-      await this.#emit({ type: 'node_end', runId: this.run.id, nodeId: recordId, nodeRef: node.id, status: 'failed', iteration, error: message });
+      await this.#emit({ type: 'node_end', runId: this.run.id, nodeId: recordId, nodeRef: node.id, status: 'failed', iteration, error: message, attempts: attempt + 1 });
       throw error;
+    }
+    }
     } finally {
       if (consumesConcurrency) this.semaphore.release();
     }
