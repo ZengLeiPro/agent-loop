@@ -38,12 +38,26 @@ const eventsConnectionEl = document.querySelector('#eventsConnection');
 const qualityGateEl = document.querySelector('#qualityGate');
 const changesEvidenceEl = document.querySelector('#changesEvidence');
 const toastRegionEl = document.querySelector('#toastRegion');
+const templateSelectEl = document.querySelector('#templateName');
+const templateDescriptionEl = document.querySelector('#templateDescription');
+const dagNodeListEl = document.querySelector('#dagNodeList');
+const dagNodeDetailEl = document.querySelector('#dagNodeDetail');
+const dagRefreshEl = document.querySelector('#dagRefresh');
+const editorTemplateEl = document.querySelector('#editorTemplate');
+const editorLoadEl = document.querySelector('#editorLoad');
+const editorNewEl = document.querySelector('#editorNew');
+const editorSaveEl = document.querySelector('#editorSave');
+const editorCanvasEl = document.querySelector('#editorCanvas');
+const editorInspectorBodyEl = document.querySelector('#editorInspectorBody');
+const editorJsonPreviewEl = document.querySelector('#editorJsonPreview');
 
 const pageViews = [...document.querySelectorAll('[data-page]')];
 const pageNavLinks = [...document.querySelectorAll('[data-nav-page]')];
 const PAGE_TITLES = {
   launch: 'Launch',
   monitor: 'Monitor',
+  dag: 'DAG',
+  editor: 'Editor',
   events: 'Events',
   quality: 'Quality',
   debug: 'Debug',
@@ -294,6 +308,123 @@ function renderSummary(data) {
   `;
 }
 
+let selectedDagNodeId = null;
+let currentTemplateCache = null;
+
+function nodeStatusLabel(node) {
+  return STATUS_LABELS[node.status] || node.status || '未知';
+}
+
+function renderDagNodes(run) {
+  if (!dagNodeListEl) return;
+  const nodes = Array.isArray(run?.nodes) ? run.nodes : [];
+  if (!nodes.length) {
+    dagNodeListEl.innerHTML = '<div class="empty-state">当前 run 还没有节点记录。</div>';
+    dagNodeDetailEl.innerHTML = '<div class="empty-state">点击左侧节点查看产出。</div>';
+    return;
+  }
+
+  if (!selectedDagNodeId || !nodes.some(node => node.id === selectedDagNodeId)) {
+    selectedDagNodeId = nodes.at(-1).id;
+  }
+
+  dagNodeListEl.innerHTML = nodes.map(node => `
+    <button class="dag-node-item dag-node-${classToken(node.status)} ${node.id === selectedDagNodeId ? 'is-selected' : ''}"
+            type="button" data-node-id="${escapeHtml(node.id)}">
+      <span class="dag-node-id">${escapeHtml(node.id)}</span>
+      <span class="dag-node-meta">
+        <span class="dag-node-type">${escapeHtml(node.type || node.legacyRole || 'node')}</span>
+        ${node.iteration ? `<span class="dag-node-iter">iter ${escapeHtml(node.iteration)}</span>` : ''}
+      </span>
+      <span class="dag-node-status">${escapeHtml(nodeStatusLabel(node))}</span>
+    </button>
+  `).join('');
+
+  for (const button of dagNodeListEl.querySelectorAll('[data-node-id]')) {
+    button.addEventListener('click', () => {
+      selectedDagNodeId = button.dataset.nodeId;
+      renderDagNodes(run);
+    });
+  }
+
+  const selected = nodes.find(node => node.id === selectedDagNodeId);
+  if (selected) renderDagDetail(selected);
+}
+
+function renderDagDetail(node) {
+  if (!dagNodeDetailEl) return;
+  dagNodeDetailEl.innerHTML = `
+    <div class="dag-detail-header">
+      <span class="status-badge status-${classToken(node.status)}">${escapeHtml(nodeStatusLabel(node))}</span>
+      <h3>${escapeHtml(node.id)}</h3>
+    </div>
+    <div class="summary-grid">
+      <div><span>type</span><strong>${escapeHtml(node.type || '—')}</strong></div>
+      <div><span>nodeRef</span><strong>${escapeHtml(node.nodeRef || node.id)}</strong></div>
+      <div><span>iteration</span><strong>${escapeHtml(node.iteration ?? '—')}</strong></div>
+      <div><span>parentLoopId</span><strong>${escapeHtml(node.parentLoopId || '—')}</strong></div>
+      <div><span>开始</span><strong>${escapeHtml(formatDate(node.startedAt))}</strong></div>
+      <div><span>完成</span><strong>${escapeHtml(formatDate(node.completedAt))}</strong></div>
+      <div><span>耗时</span><strong>${escapeHtml(formatDuration(node.startedAt, node.completedAt))}</strong></div>
+      <div><span>sessionId</span><strong><code>${escapeHtml(node.sessionId || '—')}</code></strong></div>
+      <div><span>成本</span><strong>${typeof node.totalCostUsd === 'number' ? `$${node.totalCostUsd.toFixed(4)}` : '—'}</strong></div>
+      <div><span>outputPath</span><strong><code>${escapeHtml(node.outputPath || '—')}</code></strong></div>
+    </div>
+    ${node.error ? `<div class="error-card"><strong>错误</strong><p>${escapeHtml(node.error)}</p></div>` : ''}
+    ${node.gitAfter ? `<div class="summary-grid"><div><span>git after</span><strong><code>${escapeHtml(node.gitAfter)}</code></strong></div></div>` : ''}
+  `;
+}
+
+async function refreshTemplates() {
+  if (!templateSelectEl) return;
+  try {
+    const response = await fetch('/api/templates');
+    const data = await readJson(response);
+    const templates = Array.isArray(data.templates) ? data.templates : [];
+    const previous = templateSelectEl.value;
+    templateSelectEl.innerHTML = templates.map(item =>
+      `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}${item.source === 'user' ? '（用户）' : '（内置）'}</option>`
+    ).join('') || '<option value="ralph-compound">ralph-compound（内置）</option>';
+    if (templates.some(t => t.name === previous)) templateSelectEl.value = previous;
+    if (editorTemplateEl) {
+      editorTemplateEl.innerHTML = templates.map(item =>
+        `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}${item.source === 'user' ? '（用户）' : '（内置）'}</option>`
+      ).join('') || '<option value="ralph-compound">ralph-compound</option>';
+    }
+    renderTemplateDescription();
+  } catch (error) {
+    if (templateSelectEl.options.length === 0) templateSelectEl.innerHTML = '<option value="ralph-compound">ralph-compound（内置）</option>';
+  }
+}
+
+async function renderTemplateDescription() {
+  if (!templateSelectEl || !templateDescriptionEl) return;
+  const name = templateSelectEl.value;
+  if (!name) { templateDescriptionEl.textContent = ''; return; }
+  try {
+    const response = await fetch(`/api/templates/${encodeURIComponent(name)}`);
+    const data = await readJson(response);
+    currentTemplateCache = data.dag;
+    const dag = data.dag || {};
+    const desc = dag.description || '';
+    const nodeCount = (function count(nodes) {
+      let total = 0;
+      for (const node of nodes || []) {
+        total += 1;
+        if (node.type === 'loop' && Array.isArray(node.subgraph)) total += count(node.subgraph);
+      }
+      return total;
+    })(dag.nodes);
+    templateDescriptionEl.innerHTML = `
+      <strong>${escapeHtml(dag.name || name)}</strong>
+      <span>${escapeHtml(desc || '无描述')}</span>
+      <code>${nodeCount} 个节点 · concurrency ${escapeHtml(dag.concurrency ?? 1)}</code>
+    `;
+  } catch (error) {
+    templateDescriptionEl.textContent = error.message;
+  }
+}
+
 function renderTimeline(run) {
   const phases = run?.phases || [];
   if (phases.length === 0) {
@@ -340,6 +471,7 @@ function renderStatus(data) {
   statusEl.textContent = JSON.stringify(data, null, 2);
   renderSummary(data);
   renderTimeline(data.run);
+  renderDagNodes(data.run);
   updateRunControls(data.run);
   setAutoRefresh(data.run);
   renderSyntheticEvents(data.run);
@@ -778,6 +910,7 @@ async function createRun() {
         prompt,
         dryRun: dryRunEl.checked,
         plannerOnly: plannerOnlyEl.checked,
+        template: templateSelectEl ? templateSelectEl.value || undefined : undefined,
         maxRounds: optionalNumber(maxRoundsEl),
         maxTurns: optionalNumber(maxTurnsEl),
         permissionMode: optionalString(permissionModeEl),
@@ -824,8 +957,11 @@ createButton.addEventListener('click', createRun);
 loadPromptsButton.addEventListener('click', loadPrompts);
 savePromptsButton.addEventListener('click', savePrompts);
 
+if (templateSelectEl) templateSelectEl.addEventListener('change', renderTemplateDescription);
+if (dagRefreshEl) dagRefreshEl.addEventListener('click', () => refresh().catch(renderError));
+
 setupPageNavigation();
 applyAutopilotLevel(autopilotLevelEl.value);
 renderPrdOverview();
 startEventStream();
-Promise.all([refresh(), loadReview(), loadPrompts(), refreshArtifacts({ silent: true })]).catch(renderError);
+Promise.all([refresh(), loadReview(), loadPrompts(), refreshArtifacts({ silent: true }), refreshTemplates()]).catch(renderError);

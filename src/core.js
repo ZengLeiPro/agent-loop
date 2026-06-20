@@ -75,7 +75,8 @@ export async function startRun({
   models = {},
   maxTurns = 50,
   permissionMode = 'acceptEdits',
-  plannerOnly = false
+  plannerOnly = false,
+  template = 'ralph-compound'
 } = {}) {
   if (!prompt || !prompt.trim()) throw new Error('A non-empty prompt is required.');
   await ensureStateDir(cwd);
@@ -105,7 +106,7 @@ export async function startRun({
     app: 'agent-loop',
     version: 1,
     schemaVersion: RUN_SCHEMA_VERSION,
-    template: 'ralph-compound',
+    template,
     status: dryRun ? 'planned' : 'waiting-for-agent-adapter',
     prompt: prompt.trim(),
     currentRound: 0,

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MAX_ROUNDS, readReviewFiles, readRun, startRun, stateDir, writeReviewFiles } from './core.js';
@@ -12,6 +12,9 @@ import { JobManager } from './job-manager.js';
 import { readControl, writeControl } from './control.js';
 import { assertPermissionModeAllowed } from './policy.js';
 import { clearRunLock, isActiveRun, readRunLock, writeRunLock } from './run-lock.js';
+import { listTemplates, loadTemplate, userTemplatesDir } from './dag/templates.js';
+import { parseAndValidateDag } from './dag/schema.js';
+import { knownToolNames } from './dag/tools.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const webRoot = resolve(__dirname, '../web');
@@ -86,7 +89,8 @@ function requireApiAccess(req, url, apiToken) {
   throw new HttpError(401, 'API token required for non-loopback requests.');
 }
 
-const appPagePaths = new Set(['/', '/launch', '/monitor', '/events', '/quality', '/debug', '/review', '/prompts']);
+const appPagePaths = new Set(['/', '/launch', '/monitor', '/events', '/quality', '/debug', '/review', '/prompts', '/dag', '/editor']);
+const TEMPLATE_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
 function resolveStaticPath(pathname) {
   const normalizedPathname = appPagePaths.has(pathname) ? '/index.html' : pathname;
@@ -227,6 +231,35 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
         const body = await readJsonBody(req);
         return json(res, 200, { files: await writeReviewFiles({ cwd, files: body.files }) });
       }
+      if (url.pathname === '/api/templates' && req.method === 'GET') {
+        const items = await listTemplates(cwd);
+        return json(res, 200, { templates: items.map(item => ({ name: item.name, source: item.source })) });
+      }
+      const templateMatch = /^\/api\/templates\/([a-zA-Z][a-zA-Z0-9_-]*)$/.exec(url.pathname);
+      if (templateMatch) {
+        const name = templateMatch[1];
+        if (req.method === 'GET') {
+          const { dag, path, name: resolvedName } = await loadTemplate(name, { cwd, knownTools: knownToolNames() });
+          return json(res, 200, { name: resolvedName, path, dag });
+        }
+        if (req.method === 'PUT') {
+          const body = await readJsonBody(req);
+          if (!body.dag) throw new HttpError(400, 'PUT body must include { dag: <object> }.');
+          const dag = parseAndValidateDag(body.dag, { knownTools: knownToolNames() });
+          const dir = userTemplatesDir(cwd);
+          await mkdir(dir, { recursive: true });
+          const targetPath = join(dir, `${name}.json`);
+          await writeFile(targetPath, `${JSON.stringify(dag, null, 2)}\n`, 'utf8');
+          return json(res, 200, { name, path: targetPath, dag });
+        }
+        if (req.method === 'DELETE') {
+          const targetPath = join(userTemplatesDir(cwd), `${name}.json`);
+          await unlink(targetPath).catch(error => {
+            if (error.code !== 'ENOENT') throw error;
+          });
+          return json(res, 200, { name, deleted: true });
+        }
+      }
       if (url.pathname === '/api/prompts' && req.method === 'PUT') {
         const body = await readJsonBody(req);
         return json(res, 200, await writeEditablePrompts({
@@ -263,7 +296,7 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
         if (isActiveRun(existingRun) || jobs.active().length > 0) return json(res, 409, { error: 'An agent-loop run is already active for this directory.' });
         const options = validateRunOptions(body, { cwd, defaultMaxRounds: DEFAULT_MAX_ROUNDS });
         assertPermissionModeAllowed(options.permissionMode, { allowDangerous: body.allowDangerous === true });
-        const run = await startRun({ ...options, dryRun: body.dryRun !== false });
+        const run = await startRun({ ...options, dryRun: body.dryRun !== false, template: options.template });
         await writeRunLock(cwd, { runId: run.id, type: body.dryRun !== false ? 'dry-run' : 'run' });
         const job = await jobs.create({
           type: body.dryRun !== false ? 'dry-run' : 'run',
@@ -278,6 +311,7 @@ export function createAgentLoopServer({ cwd = process.cwd(), apiToken = process.
                     maxTurns: options.maxTurns,
                     permissionMode: options.permissionMode,
                     plannerOnly: options.plannerOnly,
+                    template: options.template,
                     models: options.models,
                     sdk: options.sdk,
                     publishEvent: event => eventHub.publish(event)

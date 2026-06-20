@@ -64,6 +64,15 @@ export function cleanSdkOptions(sdk = {}) {
   );
 }
 
+const TEMPLATE_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+
+export function optionalTemplateName(value) {
+  const name = optionalStringValue(value);
+  if (!name) return undefined;
+  if (!TEMPLATE_NAME_RE.test(name)) throw new ValidationError(`template name must match ${TEMPLATE_NAME_RE}.`);
+  return name;
+}
+
 export function validateRunOptions(input = {}, { cwd, defaultMaxRounds = 30 } = {}) {
   const prompt = optionalStringValue(input.prompt);
   if (!prompt) throw new ValidationError('A non-empty prompt is required.');
@@ -74,6 +83,7 @@ export function validateRunOptions(input = {}, { cwd, defaultMaxRounds = 30 } = 
     maxTurns: positiveInteger(input.maxTurns, DEFAULT_MAX_TURNS, 'maxTurns'),
     permissionMode: optionalPermissionMode(input.permissionMode),
     plannerOnly: Boolean(input.plannerOnly),
+    template: optionalTemplateName(input.template),
     models: cleanModels(input.models),
     sdk: cleanSdkOptions(input.sdk)
   };

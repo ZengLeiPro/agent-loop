@@ -183,3 +183,53 @@ summary { cursor: pointer; color: #1e293b; font-weight: 900; }
 
 @media (max-width: 1040px) { .control-grid, .evidence-columns, .compact-summary { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .panel-mini-header { flex-direction: column; } .control-grid { grid-template-columns: 1fr 1fr; } }
+
+/* DAG views */
+.dag-card, .editor-card { border: 1px solid var(--border); border-radius: 28px; background: rgb(255 255 255 / 88%); box-shadow: var(--shadow); padding: 24px; }
+.dag-layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; margin-top: 16px; min-height: 460px; }
+.dag-node-list { display: grid; gap: 6px; align-content: flex-start; max-height: 600px; overflow: auto; padding-right: 4px; }
+.dag-node-item { display: grid; gap: 4px; border: 1px solid var(--border); border-left: 4px solid #94a3b8; border-radius: 12px; padding: 10px 12px; background: #fff; cursor: pointer; text-align: left; }
+.dag-node-item:hover { border-color: #93c5fd; }
+.dag-node-item.is-selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgb(37 99 235 / 18%); }
+.dag-node-running { border-left-color: var(--primary); }
+.dag-node-completed { border-left-color: var(--green); }
+.dag-node-failed { border-left-color: var(--red); }
+.dag-node-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #0f172a; font-weight: 900; font-size: 13px; overflow-wrap: anywhere; }
+.dag-node-meta { display: flex; gap: 8px; color: var(--muted); font-size: 12px; }
+.dag-node-type { padding: 2px 8px; border-radius: 999px; background: var(--surface-muted); border: 1px solid var(--border); font-weight: 800; }
+.dag-node-iter { padding: 2px 6px; border-radius: 999px; background: var(--primary-soft); color: var(--primary-dark); font-weight: 800; }
+.dag-node-status { color: var(--muted-strong); font-size: 12px; font-weight: 800; }
+.dag-node-detail { border: 1px solid var(--border); border-radius: 18px; background: var(--surface-muted); padding: 16px; min-height: 420px; }
+.dag-detail-header { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.dag-detail-header h3 { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.template-panel { display: grid; gap: 8px; margin: 16px 0 14px; border: 1px solid #bfdbfe; border-radius: 22px; padding: 16px; background: linear-gradient(135deg, #f0f6ff, #fff); }
+.template-panel h3 { font-size: 17px; }
+.template-panel .hint { margin: 4px 0 0; }
+.mapping-card-inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px dashed #93c5fd; border-radius: 14px; padding: 8px 12px; background: #fff; color: var(--muted-strong); margin-top: 6px; }
+.mapping-card-inline strong { color: #0f172a; }
+.mapping-card-inline span { flex-basis: 100%; line-height: 1.5; }
+.mapping-card-inline code { display: inline-flex; border-radius: 999px; padding: 4px 8px; background: var(--primary-soft); font-size: 12px; font-weight: 850; }
+
+/* Editor (PR5 expansion lands here later) */
+.editor-card .editor-root { display: grid; grid-template-columns: 1fr 320px; gap: 16px; min-height: 520px; margin-top: 14px; }
+.editor-canvas { position: relative; border: 1px solid var(--border); border-radius: 18px; background: #fbfbff; min-height: 520px; overflow: hidden; }
+.editor-canvas .canvas-svg { width: 100%; height: 100%; }
+.editor-canvas .node { fill: #fff; stroke: var(--border-strong); stroke-width: 1.5; }
+.editor-canvas .node-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #0f172a; }
+.editor-canvas .node.selected { stroke: #2563eb; stroke-width: 2.5; }
+.editor-canvas .node.agent { fill: #eff6ff; }
+.editor-canvas .node.loop { fill: #fef3c7; }
+.editor-canvas .node.tool { fill: #f0fdf4; }
+.editor-canvas .node.gather { fill: #fae8ff; }
+.editor-canvas .edge { stroke: #94a3b8; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+.editor-inspector { border: 1px solid var(--border); border-radius: 18px; background: var(--surface-muted); padding: 14px; overflow: auto; max-height: 600px; }
+.editor-inspector h3 { font-size: 15px; margin-bottom: 8px; }
+.editor-inspector label { display: grid; gap: 4px; margin-bottom: 10px; color: var(--muted-strong); font-weight: 800; font-size: 13px; }
+.editor-inspector input, .editor-inspector textarea, .editor-inspector select { font-size: 13px; min-height: 36px; }
+.editor-inspector textarea { min-height: 86px; }
+.editor-inspector .inspector-actions { display: flex; gap: 8px; margin-top: 12px; }
+.editor-inspector .danger-button { color: #b91c1c; background: #fff; border-color: #fecaca; }
+.editor-json { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.editor-json pre { max-height: 320px; }
+
+@media (max-width: 1040px) { .dag-layout, .editor-card .editor-root { grid-template-columns: 1fr; } }

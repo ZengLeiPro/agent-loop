@@ -51,13 +51,17 @@ export async function listTemplates(cwd = process.cwd()) {
 
 export function templatePath(cwd, name) {
   if (typeof name !== 'string' || !TEMPLATE_NAME_PATTERN.test(name)) {
-    throw new Error(`Invalid template name "${name}". Must match ${TEMPLATE_NAME_PATTERN}.`);
+    const error = new Error(`Invalid template name "${name}". Must match ${TEMPLATE_NAME_PATTERN}.`);
+    error.statusCode = 400;
+    throw error;
   }
   const userPath = join(userTemplatesDir(cwd), `${name}.json`);
   if (existsSync(userPath)) return userPath;
   const bundledPath = join(bundledTemplatesRoot, `${name}.json`);
   if (existsSync(bundledPath)) return bundledPath;
-  throw new Error(`Template "${name}" not found. Looked under: ${userPath}, ${bundledPath}`);
+  const error = new Error(`Template "${name}" not found. Looked under: ${userPath}, ${bundledPath}`);
+  error.statusCode = 404;
+  throw error;
 }
 
 export async function loadTemplate(name, { cwd = process.cwd(), knownTools = new Set() } = {}) {

@@ -4,6 +4,7 @@ import { initProject, readRun, startRun, summarizeRun } from './core.js';
 import { runAgentLoop, verifyRunCompletion } from './runner.js';
 import { serve } from './web-server.js';
 import { validateRunOptions } from './validation.js';
+import { listTemplates } from './dag/templates.js';
 
 function printHelp() {
   console.log([
@@ -11,9 +12,10 @@ function printHelp() {
     '',
     'Usage:',
     '  agent-loop init [--cwd PATH] [--force]',
-    '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]',
+    '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--template NAME] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]',
     '  agent-loop resume [--cwd PATH]',
     '  agent-loop status [--cwd PATH]',
+    '  agent-loop templates [--cwd PATH]',
     '  agent-loop verify [--cwd PATH] [--round N]',
     '  agent-loop ui [--cwd PATH] [--port N] [--host HOST]',
     '',
@@ -69,7 +71,7 @@ export async function main(args) {
   if (command === 'run') {
     const prompt = stripFlags(
       rest,
-      new Set(['--cwd', '--max-rounds', '--max-turns', '--planner-model', '--worker-model', '--judge-model', '--permission-mode']),
+      new Set(['--cwd', '--max-rounds', '--max-turns', '--planner-model', '--worker-model', '--judge-model', '--permission-mode', '--template']),
       new Set(['--dry-run', '--planner-only'])
     ).join(' ');
     const options = validateRunOptions({
@@ -78,6 +80,7 @@ export async function main(args) {
       maxTurns: readFlag(rest, '--max-turns', '50'),
       permissionMode: readFlag(rest, '--permission-mode', 'acceptEdits'),
       plannerOnly: rest.includes('--planner-only'),
+      template: readFlag(rest, '--template', undefined),
       models: modelFlags(rest)
     }, { cwd });
     if (rest.includes('--dry-run')) {
@@ -89,6 +92,17 @@ export async function main(args) {
     const run = await runAgentLoop(options);
     console.log('agent-loop run finished or paused.');
     console.log(summarizeRun(run));
+    return;
+  }
+  if (command === 'templates') {
+    const items = await listTemplates(cwd);
+    if (!items.length) {
+      console.log('No templates found.');
+      return;
+    }
+    for (const item of items) {
+      console.log(`${item.name.padEnd(30)} ${item.source.padEnd(8)} ${item.path}`);
+    }
     return;
   }
   if (command === 'resume') {
