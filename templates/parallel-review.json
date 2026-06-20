@@ -1,0 +1,41 @@
+{
+  "$schemaVersion": 1,
+  "name": "parallel-review",
+  "description": "Three reader agents review the diff in parallel from different angles (correctness / perf / security), then a synthesizer agent merges findings into a single report.",
+  "concurrency": 4,
+  "nodes": [
+    {
+      "id": "review-correctness",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "judge",
+      "promptRef": "ralph-compound/judge.md",
+      "user": "Review the working-tree changes (`git diff HEAD --stat` then `git diff HEAD`) ONLY through the **correctness** lens: missing edge cases, off-by-one, contract violations, broken invariants. Output a short markdown report under .agent-loop/reviews/correctness.md. End with the line VERDICT: PASS or VERDICT: FAIL.\n\nUser intent: {{input.prompt}}"
+    },
+    {
+      "id": "review-perf",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "judge",
+      "promptRef": "ralph-compound/judge.md",
+      "user": "Review the working-tree changes ONLY through the **performance** lens: O(n) regressions, N+1 queries, unnecessary allocations, blocking I/O on hot paths. Output a short markdown report under .agent-loop/reviews/perf.md. End with VERDICT: PASS or VERDICT: FAIL.\n\nUser intent: {{input.prompt}}"
+    },
+    {
+      "id": "review-security",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "judge",
+      "promptRef": "ralph-compound/judge.md",
+      "user": "Review the working-tree changes ONLY through the **security** lens: input validation, secrets, injection, authn/authz, path traversal, unsafe deserialization. Output .agent-loop/reviews/security.md. End with VERDICT: PASS or VERDICT: FAIL.\n\nUser intent: {{input.prompt}}"
+    },
+    {
+      "id": "synthesize",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "planner",
+      "promptRef": "ralph-compound/planner.md",
+      "user": "Three reviewers wrote individual reports under .agent-loop/reviews/ (correctness.md, perf.md, security.md). Read all three, deduplicate, prioritize, and write a single consolidated report to .agent-loop/reviews/_summary.md. Pull each finding's severity (blocker / warning / note) and group by file. End the summary with one of: OVERALL: PASS or OVERALL: FAIL.",
+      "inputs": ["review-correctness", "review-perf", "review-security"]
+    }
+  ]
+}

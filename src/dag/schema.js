@@ -190,6 +190,11 @@ function validateNode(node, path, knownTools) {
   if (node.label !== undefined && typeof node.label !== 'string') {
     fail(`${path}.label`, 'must be a string when present.');
   }
+  if (node.position !== undefined) {
+    if (!isPlainObject(node.position) || typeof node.position.x !== 'number' || typeof node.position.y !== 'number') {
+      fail(`${path}.position`, 'must be { x: number, y: number } when present (UI-only hint).');
+    }
+  }
 
   if (type === 'agent') validateAgentNode(node, path);
   if (type === 'loop') validateLoopNode(node, path, knownTools);

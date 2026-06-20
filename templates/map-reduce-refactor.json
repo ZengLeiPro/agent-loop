@@ -1,0 +1,54 @@
+{
+  "$schemaVersion": 1,
+  "name": "map-reduce-refactor",
+  "description": "Planner partitions the refactor into independent batches written to .agent-loop/batches.json, then a serial loop has one Writer process one batch per iteration, with a Judge gate after each. Terminates when batches.done == true.",
+  "concurrency": 1,
+  "nodes": [
+    {
+      "id": "planner",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "planner",
+      "promptRef": "ralph-compound/planner.md",
+      "user": "Partition the following refactor into 3–15 independent batches. Each batch is a JSON object with {id, title, files: [...], acceptance: [...] }. Write them to .agent-loop/batches.json in the shape {\"batches\": [...], \"done\": false}. Then write a human-readable summary to .agent-loop/spec.md. Do NOT write code in this turn.\n\nUser request: {{input.prompt}}"
+    },
+    {
+      "id": "refactor-loop",
+      "type": "loop",
+      "inputs": ["planner"],
+      "iterationVar": "round",
+      "iterationStart": 1,
+      "maxIterations": 20,
+      "until": "nodes.judge.json.verdict == 'PASS' && nodes.verify.json.complete == true",
+      "subgraph": [
+        {
+          "id": "worker",
+          "type": "agent",
+          "agentType": "writer",
+          "model": "worker",
+          "promptRef": "ralph-compound/worker.md",
+          "user": "Round {{loop.round}}. Read .agent-loop/batches.json. Pick the first batch whose `done` is not true. Implement it end-to-end (typecheck + tests must pass for touched files). When done, set that batch's `done: true`; if ALL batches are done, set the top-level `done: true`. Commit everything (code + .agent-loop bookkeeping) in a single commit. Also append a paragraph to .agent-loop/progress.txt and, ONLY if top-level `done: true`, append the sentinel `<promise>COMPLETE</promise>` as the last line.",
+          "inputs": [],
+          "hooks": { "captureGitEvidence": true }
+        },
+        {
+          "id": "judge",
+          "type": "agent",
+          "agentType": "judge",
+          "model": "judge",
+          "promptRef": "ralph-compound/judge.md",
+          "user": "Round {{loop.round}}. Audit the batch the Worker just completed. Run the acceptance steps for that batch only. Write .agent-loop/judge-{{loop.round}}.md ending with VERDICT: PASS or VERDICT: FAIL.",
+          "inputs": ["worker"],
+          "hooks": { "writeJudgeVerdictJson": true }
+        },
+        {
+          "id": "verify",
+          "type": "tool",
+          "tool": "verifyRunCompletion",
+          "args": { "round": "{{loop.round}}" },
+          "inputs": ["judge"]
+        }
+      ]
+    }
+  ]
+}

@@ -212,8 +212,15 @@ summary { cursor: pointer; color: #1e293b; font-weight: 900; }
 
 /* Editor (PR5 expansion lands here later) */
 .editor-card .editor-root { display: grid; grid-template-columns: 1fr 320px; gap: 16px; min-height: 520px; margin-top: 14px; }
-.editor-canvas { position: relative; border: 1px solid var(--border); border-radius: 18px; background: #fbfbff; min-height: 520px; overflow: hidden; }
-.editor-canvas .canvas-svg { width: 100%; height: 100%; }
+.editor-canvas { position: relative; border: 1px solid var(--border); border-radius: 18px; background: #fbfbff; min-height: 520px; overflow: auto; }
+.editor-canvas .canvas-svg { display: block; width: 100%; min-height: 480px; }
+.editor-canvas .canvas-toolbar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: rgb(255 255 255 / 95%); border-top: 1px solid var(--border); }
+.editor-canvas .canvas-toolbar button { padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: #fff; color: #1e293b; font-weight: 900; cursor: pointer; }
+.editor-canvas .canvas-toolbar button:hover { border-color: #93c5fd; }
+.editor-canvas .canvas-toolbar .hint { margin-left: auto; }
+.editor-canvas .node { cursor: grab; }
+.editor-canvas .node .anchor-out { cursor: crosshair; }
+.editor-canvas .node text { pointer-events: none; }
 .editor-canvas .node { fill: #fff; stroke: var(--border-strong); stroke-width: 1.5; }
 .editor-canvas .node-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #0f172a; }
 .editor-canvas .node.selected { stroke: #2563eb; stroke-width: 2.5; }

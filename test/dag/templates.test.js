@@ -52,3 +52,16 @@ test('templatePath rejects invalid names', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-templates-bad-name-'));
   assert.throws(() => templatePath(cwd, '../etc/passwd'), /Invalid template name/);
 });
+
+test('all bundled templates pass schema validation', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'agent-loop-bundled-validate-'));
+  const items = await listTemplates(cwd);
+  const bundled = items.filter(item => item.source === 'bundled');
+  assert.ok(bundled.length >= 3, `expected at least 3 bundled templates, got ${bundled.length}`);
+  const { knownToolNames } = await import('../../src/dag/tools.js');
+  for (const item of bundled) {
+    const { dag } = await loadTemplate(item.name, { cwd, knownTools: knownToolNames() });
+    assert.equal(dag.$schemaVersion, 1, `${item.name} should declare $schemaVersion=1`);
+    assert.ok(Array.isArray(dag.nodes) && dag.nodes.length > 0, `${item.name} must have at least one node`);
+  }
+});
