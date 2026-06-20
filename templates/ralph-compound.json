@@ -1,24 +1,71 @@
 {
-  "id": "ralph-compound",
-  "version": 1,
-  "name": "Ralph Compound (Planner / Worker / Judge)",
-  "description": "A local-first Planner → Worker → Judge loop for small, auditable implementation rounds.",
-  "roles": {
-    "planner": { "promptFile": "planner.md" },
-    "worker": { "promptFile": "worker.md" },
-    "judge": { "promptFile": "judge.md" }
-  },
-  "loop": {
-    "mode": "ralph",
-    "workerStepId": "worker",
-    "judgeStepId": "judge",
-    "progressFile": ".agent-loop/progress.txt",
-    "agentsFile": ".agent-loop/AGENTS.md",
-    "completionSentinel": "<promise>\\s*(COMPLETE)\\s*</promise>",
-    "judgeFile": ".agent-loop/judge-{{round}}.md",
-    "judgeVerdictPattern": "VERDICT\\s*:\\s*(PASS|FAIL)",
-    "verificationMode": "both",
-    "judgeRequired": true,
-    "maxRounds": 30
+  "$schemaVersion": 1,
+  "name": "ralph-compound",
+  "description": "Planner → loop(Worker → Judge → verify) until sentinel + PRD passes + Judge PASS. 兼容旧版 Agent Loop 行为。",
+  "concurrency": 1,
+  "nodes": [
+    {
+      "id": "planner",
+      "type": "agent",
+      "agentType": "reader",
+      "model": "planner",
+      "promptRef": "ralph-compound/planner.md",
+      "user": "请为以下请求创建 .agent-loop/spec.md 和 .agent-loop/prd.json：\n\n{{input.prompt}}",
+      "inputs": [],
+      "hooks": {
+        "captureGitEvidence": false,
+        "writeJudgeVerdictJson": false
+      }
+    },
+    {
+      "id": "review-loop",
+      "type": "loop",
+      "inputs": ["planner"],
+      "iterationVar": "round",
+      "iterationStart": 1,
+      "maxIterations": 30,
+      "until": "nodes.verify.json.complete == true",
+      "subgraph": [
+        {
+          "id": "worker",
+          "type": "agent",
+          "agentType": "writer",
+          "model": "worker",
+          "promptRef": "ralph-compound/worker.md",
+          "user": "Round {{loop.round}}. 阅读 .agent-loop/spec.md 和 .agent-loop/prd.json。只实现一个未完成 story，更新 bookkeeping，并 commit。",
+          "inputs": [],
+          "hooks": {
+            "captureGitEvidence": true,
+            "writeJudgeVerdictJson": false
+          }
+        },
+        {
+          "id": "judge",
+          "type": "agent",
+          "agentType": "judge",
+          "model": "judge",
+          "promptRef": "ralph-compound/judge.md",
+          "user": "Round {{loop.round}}. 审计最新 worker round，写入 .agent-loop/judge-{{loop.round}}.md，并以 VERDICT: PASS 或 VERDICT: FAIL 结尾；如可行，同时写入结构化 .agent-loop/judge-{{loop.round}}.json（包含 verdict 字段）。",
+          "inputs": ["worker"],
+          "hooks": {
+            "captureGitEvidence": false,
+            "writeJudgeVerdictJson": true
+          }
+        },
+        {
+          "id": "verify",
+          "type": "tool",
+          "tool": "verifyRunCompletion",
+          "args": { "round": "{{loop.round}}" },
+          "inputs": ["judge"]
+        }
+      ]
+    }
+  ],
+  "legacy": {
+    "stateProtocolReferences": [
+      ".agent-loop/progress.txt",
+      ".agent-loop/judge-{{round}}.md"
+    ]
   }
 }

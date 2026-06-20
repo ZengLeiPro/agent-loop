@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parseAndValidatePrdJson } from './prd-schema.js';
+import { migrateRun, RUN_SCHEMA_VERSION } from './dag/migration.js';
 
 export const STATE_DIR = '.agent-loop';
 export const RUN_FILE = 'run.json';
@@ -28,7 +29,8 @@ export async function ensureStateDir(cwd = process.cwd()) {
 export async function readRun(cwd = process.cwd()) {
   const path = runFile(cwd);
   if (!existsSync(path)) return null;
-  return JSON.parse(await readFile(path, 'utf8'));
+  const raw = JSON.parse(await readFile(path, 'utf8'));
+  return migrateRun(raw);
 }
 
 export async function writeRun(run, cwd = process.cwd()) {
@@ -50,11 +52,14 @@ export async function initProject({ cwd = process.cwd(), force = false } = {}) {
     id: `run_${randomUUID().slice(0, 12)}`,
     app: 'agent-loop',
     version: 1,
+    schemaVersion: RUN_SCHEMA_VERSION,
+    template: 'ralph-compound',
     status: 'initialized',
     prompt: '',
     currentRound: 0,
     maxRounds: DEFAULT_MAX_ROUNDS,
     phases: [],
+    nodes: [],
     createdAt: now,
     updatedAt: now
   };
@@ -75,10 +80,32 @@ export async function startRun({
   if (!prompt || !prompt.trim()) throw new Error('A non-empty prompt is required.');
   await ensureStateDir(cwd);
   const now = new Date().toISOString();
+  const phases = dryRun ? [{
+    id: 'plan',
+    role: 'planner',
+    status: 'completed',
+    startedAt: now,
+    completedAt: now,
+    note: 'Dry run created local state only. Agent adapters will be implemented next.'
+  }] : [];
+  const nodes = dryRun ? [{
+    id: 'planner',
+    nodeRef: 'planner',
+    iteration: 0,
+    status: 'completed',
+    startedAt: now,
+    completedAt: now,
+    note: 'Dry run created local state only. Agent adapters will be implemented next.',
+    legacyPhaseId: 'plan',
+    legacyRole: 'planner',
+    legacyRound: 0
+  }] : [];
   const run = {
     id: `run_${randomUUID().slice(0, 12)}`,
     app: 'agent-loop',
     version: 1,
+    schemaVersion: RUN_SCHEMA_VERSION,
+    template: 'ralph-compound',
     status: dryRun ? 'planned' : 'waiting-for-agent-adapter',
     prompt: prompt.trim(),
     currentRound: 0,
@@ -91,14 +118,8 @@ export async function startRun({
       worker: models.worker || 'default-worker',
       judge: models.judge || 'default-judge'
     },
-    phases: dryRun ? [{
-      id: 'plan',
-      role: 'planner',
-      status: 'completed',
-      startedAt: now,
-      completedAt: now,
-      note: 'Dry run created local state only. Agent adapters will be implemented next.'
-    }] : [],
+    phases,
+    nodes,
     createdAt: now,
     updatedAt: now
   };
