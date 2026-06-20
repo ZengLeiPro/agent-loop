@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>agent-loop 控制台</title>
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="https://esm.sh/@xyflow/react@12/dist/style.css" />
 </head>
 <body>
   <main class="app-shell">
@@ -172,23 +173,13 @@
           <div>
             <div class="section-kicker">02c · Editor</div>
             <h2 id="editor-title">DAG 模板编辑器</h2>
-            <p class="hint">可视化拖拽节点 / 连线 / 编辑参数；保存写入 <code>.agent-loop/templates/&lt;name&gt;.json</code>，下次运行 <code>--template &lt;name&gt;</code> 即生效。</p>
-          </div>
-          <div class="actions">
-            <select id="editorTemplate" aria-label="加载模板"></select>
-            <button id="editorLoad" class="button button-secondary" type="button">加载</button>
-            <button id="editorNew" class="button button-secondary" type="button">新建</button>
-            <button id="editorSave" class="button button-primary" type="button">保存</button>
+            <p class="hint">基于 <code>@xyflow/react</code>。可视化拖拽节点 / 连线 / 编辑参数；保存写入 <code>.agent-loop/templates/&lt;name&gt;.json</code>，下次运行 <code>--template &lt;name&gt;</code> 即生效。</p>
           </div>
         </div>
-        <div id="editorRoot" class="editor-root">
-          <div id="editorCanvas" class="editor-canvas" aria-label="DAG 画布"></div>
-          <aside id="editorInspector" class="editor-inspector">
-            <h3>属性面板</h3>
-            <div id="editorInspectorBody" class="empty-state">选中节点查看 / 编辑属性，或新建节点。</div>
-          </aside>
+        <div id="editorRoot" class="editor-react-root">
+          <noscript>需要启用 JavaScript 并联网加载 React / @xyflow/react（首次加载约 200KB，后续浏览器缓存）。</noscript>
+          <div class="empty-state">正在加载 reactflow 编辑器…</div>
         </div>
-        <details class="editor-json"><summary>JSON 预览（只读）</summary><pre id="editorJsonPreview"></pre></details>
       </section>
 
       <section id="events" class="events-card page-view" data-page="events" aria-labelledby="events-title">

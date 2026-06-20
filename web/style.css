@@ -210,33 +210,61 @@ summary { cursor: pointer; color: #1e293b; font-weight: 900; }
 .mapping-card-inline span { flex-basis: 100%; line-height: 1.5; }
 .mapping-card-inline code { display: inline-flex; border-radius: 999px; padding: 4px 8px; background: var(--primary-soft); font-size: 12px; font-weight: 850; }
 
-/* Editor (PR5 expansion lands here later) */
-.editor-card .editor-root { display: grid; grid-template-columns: 1fr 320px; gap: 16px; min-height: 520px; margin-top: 14px; }
-.editor-canvas { position: relative; border: 1px solid var(--border); border-radius: 18px; background: #fbfbff; min-height: 520px; overflow: auto; }
-.editor-canvas .canvas-svg { display: block; width: 100%; min-height: 480px; }
-.editor-canvas .canvas-toolbar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: rgb(255 255 255 / 95%); border-top: 1px solid var(--border); }
-.editor-canvas .canvas-toolbar button { padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: #fff; color: #1e293b; font-weight: 900; cursor: pointer; }
-.editor-canvas .canvas-toolbar button:hover { border-color: #93c5fd; }
-.editor-canvas .canvas-toolbar .hint { margin-left: auto; }
-.editor-canvas .node { cursor: grab; }
-.editor-canvas .node .anchor-out { cursor: crosshair; }
-.editor-canvas .node text { pointer-events: none; }
-.editor-canvas .node { fill: #fff; stroke: var(--border-strong); stroke-width: 1.5; }
-.editor-canvas .node-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #0f172a; }
-.editor-canvas .node.selected { stroke: #2563eb; stroke-width: 2.5; }
-.editor-canvas .node.agent { fill: #eff6ff; }
-.editor-canvas .node.loop { fill: #fef3c7; }
-.editor-canvas .node.tool { fill: #f0fdf4; }
-.editor-canvas .node.gather { fill: #fae8ff; }
-.editor-canvas .edge { stroke: #94a3b8; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
-.editor-inspector { border: 1px solid var(--border); border-radius: 18px; background: var(--surface-muted); padding: 14px; overflow: auto; max-height: 600px; }
-.editor-inspector h3 { font-size: 15px; margin-bottom: 8px; }
-.editor-inspector label { display: grid; gap: 4px; margin-bottom: 10px; color: var(--muted-strong); font-weight: 800; font-size: 13px; }
-.editor-inspector input, .editor-inspector textarea, .editor-inspector select { font-size: 13px; min-height: 36px; }
-.editor-inspector textarea { min-height: 86px; }
-.editor-inspector .inspector-actions { display: flex; gap: 8px; margin-top: 12px; }
-.editor-inspector .danger-button { color: #b91c1c; background: #fff; border-color: #fecaca; }
-.editor-json { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
-.editor-json pre { max-height: 320px; }
+/* DAG editor — @xyflow/react container */
+.editor-react-root { margin-top: 14px; min-height: 640px; border: 1px solid var(--border); border-radius: 22px; background: #fff; overflow: hidden; box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+.editor-react-root > .empty-state { padding: 32px; }
+.rf-editor { display: grid; grid-template-rows: auto 1fr; height: clamp(640px, 78vh, 1100px); }
+.rf-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #f8fafc, #fff); }
+.rf-toolbar select { min-height: 36px; padding: 6px 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: #fff; font-size: 13px; font-weight: 800; }
+.rf-toolbar-divider { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+.rf-toolbar-label { color: var(--muted); font-size: 13px; font-weight: 800; }
+.rf-tool-btn { padding: 8px 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: #fff; color: #1e293b; font-weight: 900; font-size: 13px; cursor: pointer; transition: .12s ease; }
+.rf-tool-btn:hover { border-color: #93c5fd; color: var(--primary-dark); }
+.rf-tool-primary { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: 0 6px 14px rgb(37 99 235 / 18%); }
+.rf-tool-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); color: #fff; }
+.rf-tool-danger { background: #fff; color: #b91c1c; border-color: #fecaca; }
+.rf-tool-danger:hover { background: #fff1f2; color: #991b1b; border-color: #ef4444; }
+.rf-add-btn { padding: 6px 12px; border-radius: 999px; border: 1px solid transparent; color: #fff; font-weight: 900; font-size: 12px; cursor: pointer; }
+.rf-add-btn:hover { filter: brightness(1.06); }
+.rf-add-agent { background: #2563eb; }
+.rf-add-loop { background: #d97706; }
+.rf-add-tool { background: #16a34a; }
+.rf-add-gather { background: #a21caf; }
 
-@media (max-width: 1040px) { .dag-layout, .editor-card .editor-root { grid-template-columns: 1fr; } }
+.rf-editor-body { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+.rf-canvas { position: relative; min-width: 0; min-height: 0; border-right: 1px solid var(--border); }
+.rf-canvas .react-flow { height: 100%; }
+.rf-inspector { background: var(--surface-muted); overflow: auto; padding: 16px; }
+.rf-inspector h3 { font-size: 16px; margin-bottom: 10px; color: #0f172a; display: flex; gap: 8px; align-items: center; }
+.rf-type-pill { padding: 2px 8px; border-radius: 999px; font-weight: 900; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.rf-type-agent { background: #dbeafe; color: #1d4ed8; }
+.rf-type-loop { background: #fef3c7; color: #b45309; }
+.rf-type-tool { background: #dcfce7; color: #166534; }
+.rf-type-gather { background: #f3e8ff; color: #7e22ce; }
+.rf-field { display: grid; gap: 4px; margin-bottom: 10px; }
+.rf-field-label { color: var(--muted-strong); font-weight: 850; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.rf-field-label small { text-transform: none; font-weight: 700; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+.rf-inspector input[type="text"], .rf-inspector input[type="number"], .rf-inspector select, .rf-inspector textarea {
+  width: 100%; min-height: 34px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: #fff; font-size: 13px; font-family: inherit;
+}
+.rf-inspector textarea { min-height: 80px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.rf-checkbox-group { display: grid; gap: 4px; margin-bottom: 10px; }
+.rf-checkbox-group label, .rf-inspector > div > label > input[type="checkbox"] + span,
+.rf-inspector label:has(input[type="checkbox"]) { display: flex; gap: 8px; align-items: center; color: var(--muted-strong); font-weight: 800; font-size: 13px; }
+.rf-inspector-actions { margin-top: 12px; }
+.rf-hint { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 8px; }
+.rf-json-editor textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.rf-json-error { color: #b91c1c; font-size: 12px; margin-top: 4px; display: block; }
+
+/* Custom DAG node card inside react flow */
+.rf-dag-node { min-width: 180px; padding: 10px 12px; border-style: solid; border-radius: 14px; cursor: grab; user-select: none; background: #fff; transition: box-shadow .15s ease; }
+.rf-dag-node:active { cursor: grabbing; }
+.rf-dag-row1 { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.rf-dag-tag { color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 900; letter-spacing: .04em; }
+.rf-dag-id { color: #0f172a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; }
+.rf-dag-row2 { color: var(--muted-strong); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rf-dag-handle { width: 10px !important; height: 10px !important; background: #fff !important; border: 1.5px solid #94a3b8 !important; }
+.react-flow__handle:hover { background: #2563eb !important; }
+
+@media (max-width: 1040px) { .dag-layout { grid-template-columns: 1fr; } .rf-editor-body { grid-template-columns: 1fr; } .rf-inspector { border-top: 1px solid var(--border); max-height: 420px; } }
