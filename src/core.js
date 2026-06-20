@@ -36,7 +36,7 @@ export async function readRun(cwd = process.cwd()) {
 export async function writeRun(run, cwd = process.cwd()) {
   await ensureStateDir(cwd);
   const path = runFile(cwd);
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = `${path}.${process.pid}.${Date.now()}.${randomUUID().slice(0, 6)}.tmp`;
   await writeFile(tmp, `${JSON.stringify(run, null, 2)}\n`, 'utf8');
   await rename(tmp, path);
 }

@@ -1,153 +1,45 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+// runner.js —— 把所有调度委托给 DAG executor，只负责：
+// 1. start/resume run；
+// 2. git preflight；
+// 3. lock 管理；
+// 4. plannerOnly checkpoint（执行完前置节点后停止等待人工 review）；
+// 5. 模板加载（默认 ralph-compound）。
+//
+// verifyRunCompletion 已移到 src/verify-completion.js；这里 re-export 保持向后兼容。
+
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { ClaudeAgentAdapter } from './claude-agent-adapter.js';
 import { DEFAULT_MAX_ROUNDS, readRun, seedHarnessFiles, startRun, stateDir, writeRun } from './core.js';
-import { writeEvidence, readJsonIfExists, writeJudgeVerdictJson } from './evidence.js';
+import { writeEvidence } from './evidence.js';
 import { appendEvent } from './events.js';
-import { collectGitEvidence, gitPreflight } from './git-safety.js';
-import { allowedToolsForRole } from './policy.js';
-import { readEditablePrompts, renderPhasePrompt, systemPromptFile } from './prompts.js';
-import { clearControl, shouldStopAfterPhase } from './control.js';
-import { assertCurrentRun, clearRunLock, touchRunLock } from './run-lock.js';
+import { gitPreflight } from './git-safety.js';
+import { readEditablePrompts, ensureEditablePrompts, systemPromptFile, PROMPT_ROLES } from './prompts.js';
+import { clearControl } from './control.js';
+import { assertCurrentRun, clearRunLock, writeRunLock } from './run-lock.js';
+import { DagExecutor } from './dag/executor.js';
+import { loadTemplate } from './dag/templates.js';
 
-async function appendFile(path, content) {
-  await mkdir(dirname(path), { recursive: true });
-  const previous = existsSync(path) ? await readFile(path, 'utf8') : '';
-  await writeFile(path, `${previous}${content}`, 'utf8');
-}
+// Re-export for callers that imported it from runner.js historically (CLI, web-server).
+export { verifyRunCompletion } from './verify-completion.js';
 
-function stalePlannerPlaceholder(phase) {
-  return phase?.id === 'plan' && phase.role === 'planner' && phase.status === 'pending';
-}
+const RALPH_PRE_REVIEW_NODES = ['planner']; // nodes to run before review-loop in plannerOnly mode.
 
-function dropStalePlannerPlaceholders(run) {
-  run.phases = (run.phases || []).filter(phase => !stalePlannerPlaceholder(phase));
-}
-
-async function applyControlAfterPhase(cwd, run, publishEvent = event => appendEvent(cwd, event)) {
-  const control = await shouldStopAfterPhase(cwd);
-  if (!control) return false;
-  run.status = control.action === 'cancel' ? 'cancelled' : 'paused';
-  run.control = control;
-  run.updatedAt = new Date().toISOString();
-  await assertCurrentRun(cwd, run.id);
-  await writeRun(run, cwd);
-  await publishEvent({ type: 'control', action: control.action, status: run.status, runId: run.id });
-  return true;
-}
-
-async function runAgentPhase({ adapter, cwd, run, role, round, prompt, systemPromptFile, publishEvent = event => appendEvent(cwd, event) }) {
-  const startedAt = new Date().toISOString();
-  const normalizedRound = round ?? 0;
-  const phaseId = `${role}-${normalizedRound}`;
-  const phaseIndex = (run.phases || []).findIndex(phase => (
-    phase.role === role
-    && phase.status === 'pending'
-    && (phase.round ?? 0) === normalizedRound
-  ));
-  const phase = {
-    id: phaseId,
-    role,
-    round: normalizedRound,
-    status: 'running',
-    startedAt
-  };
-  if (phaseIndex === -1) {
-    run.phases.push(phase);
-  } else {
-    run.phases[phaseIndex] = phase;
+async function resolveSystemPromptFile({ promptRef, cwd }) {
+  // promptRef like "ralph-compound/planner.md" → map to one of the editable role prompts.
+  const fileName = promptRef.split('/').pop().replace(/\.md$/, '');
+  if (PROMPT_ROLES.includes(fileName)) {
+    return systemPromptFile(cwd, fileName);
   }
-  run.status = 'running';
-  run.updatedAt = startedAt;
-  await assertCurrentRun(cwd, run.id);
-  await writeRun(run, cwd);
-  await touchRunLock(cwd, { runId: run.id, phaseId });
-  await publishEvent({ type: 'phase_start', phaseId, role, round: normalizedRound, runId: run.id });
-
-  if (role === 'worker') {
-    const beforeGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'before' });
-    phase.gitBefore = await writeEvidence(cwd, `${phaseId}-git-before`, beforeGit);
-    await assertCurrentRun(cwd, run.id);
-    await writeRun(run, cwd);
-    await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'before', evidencePath: phase.gitBefore, runId: run.id });
+  // Fallback: write the bundled prompt into .agent-loop/prompts/<base>.md once, then return it.
+  const localPath = join(stateDir(cwd), 'prompts', `${fileName}.md`);
+  if (!existsSync(localPath)) {
+    const bundledPath = join(dirname(new URL(import.meta.url).pathname), '..', 'prompts', promptRef);
+    const bundled = await readFile(bundledPath, 'utf8');
+    await mkdir(dirname(localPath), { recursive: true });
+    await writeFile(localPath, bundled, 'utf8');
   }
-
-  try {
-    const result = await adapter.run({
-      cwd,
-      role,
-      prompt,
-      systemPromptFile,
-      onEvent: event => publishEvent({ ...event, type: `agent_${event.type || 'event'}`, phaseId, role, round: normalizedRound, runId: run.id })
-    });
-    if (role === 'worker') {
-      const afterGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'after' });
-      phase.gitAfter = await writeEvidence(cwd, `${phaseId}-git-after`, afterGit);
-      await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after', evidencePath: phase.gitAfter, runId: run.id });
-    }
-    phase.status = 'completed';
-    phase.completedAt = new Date().toISOString();
-    phase.sessionId = result.sessionId;
-    phase.totalCostUsd = result.totalCostUsd;
-    run.updatedAt = phase.completedAt;
-    await assertCurrentRun(cwd, run.id);
-    await writeRun(run, cwd);
-    await touchRunLock(cwd, { runId: run.id, phaseId });
-    await publishEvent({ type: 'phase_end', phaseId, role, round: normalizedRound, status: 'completed', runId: run.id });
-    return result;
-  } catch (error) {
-    if (role === 'worker') {
-      const afterGit = await collectGitEvidence({ cwd, phaseId, role, round: normalizedRound, moment: 'after-failed' });
-      phase.gitAfter = await writeEvidence(cwd, `${phaseId}-git-after-failed`, afterGit);
-      await publishEvent({ type: 'git_evidence', phaseId, role, round: normalizedRound, moment: 'after-failed', evidencePath: phase.gitAfter, runId: run.id });
-    }
-    phase.status = 'failed';
-    phase.completedAt = new Date().toISOString();
-    phase.error = error instanceof Error ? error.message : String(error);
-    run.status = 'failed';
-    run.updatedAt = phase.completedAt;
-    await assertCurrentRun(cwd, run.id);
-    await writeRun(run, cwd);
-    await publishEvent({ type: 'phase_end', phaseId, role, round: normalizedRound, status: 'failed', error: phase.error, runId: run.id });
-    throw error;
-  }
-}
-
-export async function verifyRunCompletion(cwd = process.cwd(), round = 0) {
-  const dir = stateDir(cwd);
-  const progressPath = join(dir, 'progress.txt');
-  const prdPath = join(dir, 'prd.json');
-  const judgePath = join(dir, `judge-${round}.md`);
-
-  const progress = existsSync(progressPath) ? await readFile(progressPath, 'utf8') : '';
-  const progressLastLine = progress.trimEnd().split(/\r?\n/).at(-1) || '';
-  const sentinelOk = /^<promise>\s*COMPLETE\s*<\/promise>$/i.test(progressLastLine);
-
-  let passCountOk = false;
-  if (existsSync(prdPath)) {
-    try {
-      const prd = JSON.parse(await readFile(prdPath, 'utf8'));
-      const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
-      passCountOk = stories.length > 0 && stories.every(story => story?.passes === true);
-    } catch {
-      passCountOk = false;
-    }
-  }
-
-  const judge = existsSync(judgePath) ? await readFile(judgePath, 'utf8') : '';
-  const structuredJudge = await readJsonIfExists(join(dir, `judge-${round}.json`));
-  let judgeOk = false;
-  let judgeSource = 'markdown';
-  if (structuredJudge?.verdict) {
-    judgeOk = String(structuredJudge.verdict).toUpperCase() === 'PASS';
-    judgeSource = 'json';
-  } else {
-    const verdictMatches = [...judge.matchAll(/VERDICT\s*:\s*(PASS|FAIL)/gi)];
-    judgeOk = verdictMatches.length > 0 && verdictMatches.at(-1)[1].toUpperCase() === 'PASS';
-  }
-
-  return { sentinelOk, passCountOk, judgeOk, judgeSource, complete: sentinelOk && passCountOk && judgeOk };
+  return localPath;
 }
 
 export async function runAgentLoop({
@@ -160,6 +52,7 @@ export async function runAgentLoop({
   allowedTools,
   requireCleanGit = process.env.AGENT_LOOP_GIT_REQUIRE_CLEAN === 'true',
   plannerOnly = false,
+  template: templateName,
   sdk = {},
   publishEvent
 } = {}) {
@@ -183,8 +76,9 @@ export async function runAgentLoop({
     run.updatedAt = new Date().toISOString();
     await writeRun(run, cwd);
   }
-  dropStalePlannerPlaceholders(run);
   await seedHarnessFiles(run, cwd);
+
+  // Git preflight: block on dirty if requireClean=true.
   const preflight = await gitPreflight({ cwd, requireClean: requireCleanGit });
   run.gitPreflight = preflight;
   await writeEvidence(cwd, 'git-preflight', preflight);
@@ -204,90 +98,98 @@ export async function runAgentLoop({
     await clearRunLock(cwd, { runId: run.id });
     return run;
   }
-  const editablePrompts = await readEditablePrompts(cwd);
-  const effectiveMaxRounds = maxRounds ?? run.maxRounds ?? DEFAULT_MAX_ROUNDS;
+
+  // Load editable prompts (initializes .agent-loop/prompts/<role>.md if missing) so per-role overrides exist on disk.
+  await ensureEditablePrompts(cwd);
+  await readEditablePrompts(cwd);
+
+  // Load DAG template. Default = ralph-compound.
+  const effectiveTemplateName = templateName || run.template || 'ralph-compound';
+  const { dag } = await loadTemplate(effectiveTemplateName, { cwd });
+  run.template = effectiveTemplateName;
+
+  // Compose models: per-run + per-call overrides, keyed by ralph role names (planner/worker/judge).
+  const effectiveModels = { ...run.models, ...models };
   const effectiveMaxTurns = maxTurns ?? run.maxTurns ?? 50;
   const effectivePermissionMode = permissionMode ?? run.permissionMode ?? 'acceptEdits';
-  const effectiveModels = { ...run.models, ...models };
 
-  const adapterFor = role => new ClaudeAgentAdapter({
-    model: effectiveModels[role],
-    maxTurns: effectiveMaxTurns,
-    permissionMode: effectivePermissionMode,
-    ...sdk,
-    allowedTools: allowedToolsForRole(role, allowedTools)
-  });
+  await writeRunLock(cwd, { runId: run.id, type: 'dag' });
+  run.status = 'running';
+  await assertCurrentRun(cwd, run.id);
+  await writeRun(run, cwd);
 
-  if (!run.phases.some(phase => phase.role === 'planner' && phase.status === 'completed')) {
-    await runAgentPhase({
-      adapter: adapterFor('planner'),
-      cwd,
-      run,
-      role: 'planner',
-      prompt: renderPhasePrompt(editablePrompts.phasePrompts.planner, { prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'planner'),
-      publishEvent: emit
-    });
-  }
-
-  if (await applyControlAfterPhase(cwd, run, emit)) return run;
-
+  // Phase 1: pre-review (planner). Stop here if plannerOnly.
   if (plannerOnly) {
-    run.status = 'waiting-for-review';
-    run.updatedAt = new Date().toISOString();
-    await assertCurrentRun(cwd, run.id);
-    await writeRun(run, cwd);
-    return run;
-  }
-
-  for (let round = Math.max(1, run.currentRound || 1); round <= effectiveMaxRounds; round += 1) {
-    run.currentRound = round;
-    await assertCurrentRun(cwd, run.id);
-    await writeRun(run, cwd);
-
-    await runAgentPhase({
-      adapter: adapterFor('worker'),
+    const executor = new DagExecutor({
+      dag,
       cwd,
       run,
-      role: 'worker',
-      round,
-      prompt: renderPhasePrompt(editablePrompts.phasePrompts.worker, { round, prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'worker'),
-      publishEvent: emit
+      input: { prompt: run.prompt },
+      models: effectiveModels,
+      adapterDefaults: { maxTurns: effectiveMaxTurns, permissionMode: effectivePermissionMode, ...sdk },
+      toolOverrides: allowedTools || {},
+      systemPromptResolver: resolveSystemPromptFile,
+      publishEvent: emit,
+      runOnly: RALPH_PRE_REVIEW_NODES
     });
-    if (await applyControlAfterPhase(cwd, run, emit)) return run;
-
-    await runAgentPhase({
-      adapter: adapterFor('judge'),
-      cwd,
-      run,
-      role: 'judge',
-      round,
-      prompt: renderPhasePrompt(editablePrompts.phasePrompts.judge, { round, prompt: run.prompt }),
-      systemPromptFile: systemPromptFile(cwd, 'judge'),
-      publishEvent: emit
-    });
-    const judgeVerdict = await writeJudgeVerdictJson({ cwd, round });
-    await emit({ type: 'judge_verdict', round, verdict: judgeVerdict.verdict, pass: judgeVerdict.pass, runId: run.id });
-    if (await applyControlAfterPhase(cwd, run, emit)) return run;
-
-    const verification = await verifyRunCompletion(cwd, round);
-    await appendFile(join(stateDir(cwd), 'logs', 'verification.log'), `${new Date().toISOString()} round=${round} ${JSON.stringify(verification)}\n`);
-    await emit({ type: 'verification', round, verification, runId: run.id });
-    if (verification.complete) {
-      run.status = 'completed';
+    try {
+      await executor.execute();
+      run.status = 'waiting-for-review';
       run.updatedAt = new Date().toISOString();
       await assertCurrentRun(cwd, run.id);
       await writeRun(run, cwd);
-      await clearRunLock(cwd, { runId: run.id });
       return run;
+    } catch (error) {
+      run.status = 'failed';
+      run.updatedAt = new Date().toISOString();
+      run.lastError = error instanceof Error ? error.message : String(error);
+      await writeRun(run, cwd);
+      await clearRunLock(cwd, { runId: run.id });
+      throw error;
     }
   }
 
-  run.status = 'max_rounds_reached';
-  run.updatedAt = new Date().toISOString();
-  await assertCurrentRun(cwd, run.id);
-  await writeRun(run, cwd);
-  await clearRunLock(cwd, { runId: run.id });
+  // Otherwise: run the full DAG. If planner already ran in a previous plannerOnly invocation, skip it.
+  const plannerAlreadyDone = (run.nodes || []).some(node => node.id === 'planner' && node.status === 'completed');
+  const runOnly = plannerAlreadyDone
+    ? dag.nodes.map(node => node.id).filter(id => id !== 'planner')
+    : null;
+
+  const executor = new DagExecutor({
+    dag,
+    cwd,
+    run,
+    input: { prompt: run.prompt },
+    models: effectiveModels,
+    adapterDefaults: { maxTurns: effectiveMaxTurns, permissionMode: effectivePermissionMode, ...sdk },
+    toolOverrides: allowedTools || {},
+    systemPromptResolver: resolveSystemPromptFile,
+    publishEvent: emit,
+    runOnly
+  });
+
+  try {
+    const runtime = await executor.execute();
+    // Inspect verify outcome to decide terminal status. Ralph-compound writes verify under iteration-suffixed id.
+    const verifyOutputs = (run.nodes || []).filter(node => node.nodeRef === 'verify' && node.status === 'completed');
+    const lastVerify = verifyOutputs.at(-1);
+    if (lastVerify) {
+      // Reload the latest verify output JSON for completion check.
+      const verifyJson = runtime.getNode('verify')?.json;
+      if (verifyJson?.complete) run.status = 'completed';
+      else run.status = 'max_rounds_reached';
+    } else {
+      // No verify node ran (non-ralph template). Mark completed when all top-level nodes succeeded.
+      run.status = 'completed';
+    }
+  } catch (error) {
+    run.status = 'failed';
+    run.lastError = error instanceof Error ? error.message : String(error);
+  } finally {
+    run.updatedAt = new Date().toISOString();
+    await assertCurrentRun(cwd, run.id);
+    await writeRun(run, cwd);
+    await clearRunLock(cwd, { runId: run.id });
+  }
   return run;
 }
