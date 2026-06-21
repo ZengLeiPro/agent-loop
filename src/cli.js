@@ -12,9 +12,9 @@ function printHelp() {
     '',
     'Usage:',
     '  agent-loop init [--cwd PATH] [--force]',
-    '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--template NAME] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE]',
+    '  agent-loop run <prompt> [--cwd PATH] [--max-rounds N] [--dry-run] [--planner-only] [--template NAME] [--planner-model M] [--worker-model M] [--judge-model M] [--permission-mode MODE] [--effort LEVEL]',
     '  agent-loop plan <prompt> [--cwd PATH]                  # use meta-planner agent to produce a custom DAG',
-    '  agent-loop resume [--cwd PATH]',
+    '  agent-loop resume [--cwd PATH] [--planner-model M] [--worker-model M] [--judge-model M] [--effort LEVEL]',
     '  agent-loop status [--cwd PATH]',
     '  agent-loop templates [--cwd PATH]',
     '  agent-loop verify [--cwd PATH] [--round N]',
@@ -72,7 +72,7 @@ export async function main(args) {
   if (command === 'run') {
     const prompt = stripFlags(
       rest,
-      new Set(['--cwd', '--max-rounds', '--max-turns', '--planner-model', '--worker-model', '--judge-model', '--permission-mode', '--template']),
+      new Set(['--cwd', '--max-rounds', '--max-turns', '--planner-model', '--worker-model', '--judge-model', '--permission-mode', '--template', '--effort']),
       new Set(['--dry-run', '--planner-only'])
     ).join(' ');
     const options = validateRunOptions({
@@ -82,7 +82,8 @@ export async function main(args) {
       permissionMode: readFlag(rest, '--permission-mode', 'acceptEdits'),
       plannerOnly: rest.includes('--planner-only'),
       template: readFlag(rest, '--template', undefined),
-      models: modelFlags(rest)
+      models: modelFlags(rest),
+      sdk: { effort: readFlag(rest, '--effort', undefined) }
     }, { cwd });
     if (rest.includes('--dry-run')) {
       const run = await startRun({ ...options, dryRun: true });
@@ -116,7 +117,15 @@ export async function main(args) {
     return;
   }
   if (command === 'resume') {
-    const run = await runAgentLoop({ cwd, plannerOnly: false });
+    // resume 接受 model/effort/max-turns override:已有 run 的 prompt 沿用,但本次启动的 adapter 参数走新值。
+    // 适用场景:停下来调高 effort、换 model、修 prompt、提高 max-turns 上限等。
+    // run.json.models 不被新值覆盖写回,但本次执行的 effectiveModels / maxTurns 用新值。
+    const { cleanModels, cleanSdkOptions } = await import('./validation.js');
+    const models = cleanModels(modelFlags(rest));
+    const sdk = cleanSdkOptions({ effort: readFlag(rest, '--effort', undefined) });
+    const maxTurnsRaw = readFlag(rest, '--max-turns', undefined);
+    const maxTurns = maxTurnsRaw !== undefined ? Number(maxTurnsRaw) : undefined;
+    const run = await runAgentLoop({ cwd, plannerOnly: false, models, sdk, maxTurns });
     console.log('agent-loop resumed and finished or paused.');
     console.log(summarizeRun(run));
     return;
