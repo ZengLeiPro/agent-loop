@@ -115,9 +115,11 @@ export async function startRun({
     permissionMode,
     plannerOnly,
     models: {
-      planner: models.planner || 'default-planner',
-      worker: models.worker || 'default-worker',
-      judge: models.judge || 'default-judge'
+      // 未显式指定时留 undefined,下游 adapter 不传 --model,SDK 走 token holder 默认模型。
+      // 之前填 'default-*' 字面值会被 adapter 当真 model id 传给 API,导致 404 not_found_error。
+      planner: models.planner,
+      worker: models.worker,
+      judge: models.judge
     },
     phases,
     nodes,

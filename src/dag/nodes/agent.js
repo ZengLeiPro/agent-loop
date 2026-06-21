@@ -23,7 +23,10 @@ export async function executeAgentNode({
     ? node.allowedTools
     : allowedToolsForAgentType(node.agentType, toolOverrides);
 
-  const modelId = models[node.model] || node.model;
+  // models[node.model] = 角色键名(如 "worker")到真实 model id 的映射。
+  // 命中就用,缺失留 undefined → adapter 不传 --model → SDK 走默认。
+  // 不要 fallback 到 node.model 本身(那是角色键名,不是合法 model id,会让 SDK 调 API 404)。
+  const modelId = models[node.model] || undefined;
 
   const createAdapter = adapterFactory || (options => new ClaudeAgentAdapter(options));
   const adapter = createAdapter({
